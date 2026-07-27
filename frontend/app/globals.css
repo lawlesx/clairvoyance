@@ -1,0 +1,103 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* ── Terra Design System ───────────────────────────────────────────────────── */
+@theme inline {
+  /* Fonts */
+  --font-headline: var(--font-literata), serif;
+  --font-body: var(--font-nunito-sans), sans-serif;
+  --font-sans: var(--font-nunito-sans), sans-serif;
+  --font-mono: var(--font-geist-mono);
+
+  /* Terra color palette */
+  --color-primary:                  #4a7c59;
+  --color-on-primary:               #ffffff;
+  --color-primary-container:        #78a886;
+  --color-on-primary-container:     #d8f0de;
+  --color-primary-fixed:            #c8e8d0;
+  --color-primary-fixed-dim:        #8ecf9e;
+  --color-on-primary-fixed:         #002110;
+  --color-on-primary-fixed-variant: #2a6038;
+  --color-inverse-primary:          #8ecf9e;
+
+  --color-secondary:                #6b6358;
+  --color-on-secondary:             #ffffff;
+  --color-secondary-container:      #f0e8db;
+  --color-on-secondary-container:   #5e5548;
+  --color-secondary-fixed:          #f0e8db;
+  --color-secondary-fixed-dim:      #d4ccbf;
+  --color-on-secondary-fixed:       #1e1a13;
+  --color-on-secondary-fixed-variant: #4a4538;
+
+  --color-tertiary:                 #705c30;
+  --color-on-tertiary:              #ffffff;
+  --color-tertiary-container:       #c4a66a;
+  --color-on-tertiary-container:    #554020;
+  --color-tertiary-fixed:           #f8e0a8;
+  --color-tertiary-fixed-dim:       #dcc48e;
+  --color-on-tertiary-fixed:        #221a05;
+  --color-on-tertiary-fixed-variant: #554020;
+
+  --color-background:               #faf6f0;
+  --color-on-background:            #2e3230;
+
+  --color-surface:                  #faf6f0;
+  --color-on-surface:               #2e3230;
+  --color-surface-bright:           #faf6f0;
+  --color-surface-dim:              #dbd7cf;
+  --color-surface-variant:          #e4e0d8;
+  --color-on-surface-variant:       #4a4e4a;
+  --color-surface-tint:             #4a7c59;
+
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low:    #f5f1ea;
+  --color-surface-container:        #f0ece4;
+  --color-surface-container-high:   #eae6de;
+  --color-surface-container-highest: #e4e0d8;
+
+  --color-inverse-surface:          #2e3230;
+  --color-inverse-on-surface:       #f5f0e8;
+
+  --color-outline:                  #74796e;
+  --color-outline-variant:          #c4c8bc;
+
+  --color-error:                    #b83230;
+  --color-on-error:                 #ffffff;
+  --color-error-container:          #ffdad8;
+  --color-on-error-container:       #690005;
+
+  /* Radius */
+  --radius-DEFAULT: 0.5rem;
+  --radius-lg:      1rem;
+  --radius-xl:      1.5rem;
+  --radius-full:    9999px;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: #faf6f0;
+  color: #2e3230;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-headline);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: #c4c8bc;
+  border-radius: 20px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #74796e;
+}
+
+@keyframes slide-in-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-in {
+  animation: slide-in-up 0.18s ease-out both;
+}
