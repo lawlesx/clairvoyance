@@ -1,0 +1,9 @@
+{
+  "name": "clairvoyance",
+  "private": true,
+  "scripts": {
+    "dev:backend": "cd backend && bun run dev",
+    "dev:frontend": "cd frontend && bun run dev",
+    "dev": "bun run dev:backend & bun run dev:frontend"
+  }
+}

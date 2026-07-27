@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+.pytest_cache/
+
+# Env
+.env
+*.env
+
+# SQLite session files
+backend/sessions/
+
+# Node
+node_modules/
+.next/
+out/
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/

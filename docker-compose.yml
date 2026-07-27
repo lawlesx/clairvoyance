@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: clairvoyance_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clairvoyance
+      POSTGRES_PASSWORD: clairvoyance_dev
+      POSTGRES_DB: clairvoyance
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clairvoyance"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
