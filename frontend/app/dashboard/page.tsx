@@ -19,6 +19,17 @@ function formatShortDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+// Extract just the DB name from a connection URL, or return the name as-is
+function displayName(name: string): string {
+  try {
+    const url = new URL(name);
+    if (["postgresql:", "postgres:", "mysql:"].includes(url.protocol)) {
+      return url.pathname.replace(/^\//, "") || name;
+    }
+  } catch {}
+  return name;
+}
+
 function SessionIcon({ sourceType, size = "sm" }: { sourceType: "csv" | "database"; size?: "sm" | "lg" }) {
   const sz = size === "lg" ? "w-12 h-12 rounded-xl" : "w-9 h-9 rounded-lg";
   if (sourceType === "database") {
@@ -311,7 +322,7 @@ export default function DashboardPage() {
                       <SessionIcon sourceType={featured.sourceType} size="lg" />
                       <div className="flex-1 min-w-0 pr-48">
                         <h2 className="text-xl font-bold leading-snug truncate" style={{ color: "#2e3230" }}>
-                          {featured.name}
+                          {displayName(featured.name)}
                         </h2>
                         <div className="flex items-center gap-1.5 mt-1">
                           <svg className="w-3.5 h-3.5 shrink-0" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -376,7 +387,7 @@ export default function DashboardPage() {
               {/* Second card (compact) */}
               {second && (
                 <div
-                  className="rounded-2xl border p-5 flex flex-col cursor-pointer transition-all hover:shadow-sm"
+                  className="rounded-2xl border p-5 flex flex-col cursor-pointer transition-all hover:shadow-sm overflow-hidden"
                   style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
                   onClick={() => router.push(`/session/${second.id}`)}
                 >
@@ -384,7 +395,7 @@ export default function DashboardPage() {
                     <SessionIcon sourceType={second.sourceType} />
                     <ThreeDotsMenu s={second} />
                   </div>
-                  <h3 className="font-bold text-base leading-snug" style={{ color: "#2e3230" }}>{second.name}</h3>
+                  <h3 className="font-bold text-base leading-snug truncate" style={{ color: "#2e3230" }}>{displayName(second.name)}</h3>
                   <div className="flex items-center gap-1.5 mt-1.5">
                     <svg className="w-3.5 h-3.5 shrink-0" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -413,7 +424,7 @@ export default function DashboardPage() {
                 {rest.map((s) => (
                   <div
                     key={s.id}
-                    className="rounded-2xl border p-5 flex flex-col cursor-pointer transition-all hover:shadow-sm"
+                    className="rounded-2xl border p-5 flex flex-col cursor-pointer transition-all hover:shadow-sm overflow-hidden"
                     style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
                     onClick={() => router.push(`/session/${s.id}`)}
                   >
@@ -421,7 +432,7 @@ export default function DashboardPage() {
                       <SessionIcon sourceType={s.sourceType} />
                       <ThreeDotsMenu s={s} />
                     </div>
-                    <h3 className="font-bold text-base leading-snug" style={{ color: "#2e3230" }}>{s.name}</h3>
+                    <h3 className="font-bold text-base leading-snug truncate" style={{ color: "#2e3230" }}>{displayName(s.name)}</h3>
                     <div className="flex items-center gap-1.5 mt-1.5">
                       <svg className="w-3.5 h-3.5 shrink-0" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
