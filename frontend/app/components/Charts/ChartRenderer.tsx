@@ -134,11 +134,10 @@ export default function ChartRenderer({ config, data, overrideType, compact }: P
               data={data}
               dataKey={resolvedValueKey}
               nameKey={resolvedLabelKey}
-              cx="50%" cy="50%"
-              outerRadius={110}
+              cx="50%" cy="45%"
+              outerRadius={compact ? 70 : 100}
               strokeWidth={2}
               stroke="#faf6f0"
-              label={({ name }) => formatAxisLabel(name, resolvedLabelKey)}
             >
               {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
             </Pie>
