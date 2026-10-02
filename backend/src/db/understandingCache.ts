@@ -1,11 +1,17 @@
-import { Database } from "bun:sqlite";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db as pgDb } from "./pgClient";
 import { understandingEmbeddings, appSessions } from "./schema";
-import { embedText } from "../lib/embeddings";
 import type { DataUnderstanding } from "../agents/dataAnalyst";
 
-const SIMILARITY_THRESHOLD = 0.92;
+/**
+ * Exact-match cache for dataset understandings, keyed by a content hash (CSV) or a
+ * schema fingerprint (live database). Re-uploading the same file or reconnecting
+ * the same database is instant and costs nothing.
+ *
+ * (An earlier version also reused understandings of merely *similar* schemas via
+ * vector similarity. That could show one dataset's summary for a different dataset
+ * with similar column names, so it was removed.)
+ */
 
 export async function hashContent(contents: string[]): Promise<string> {
   const perFileHashes = await Promise.all(
@@ -19,8 +25,13 @@ export async function hashContent(contents: string[]): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function isCurrentShape(u: unknown): u is DataUnderstanding {
+  const x = u as DataUnderstanding | null;
+  // Entries written before the plain-language rewrite have no `areas`; regenerate those.
+  return !!x && typeof x.summary === "string" && Array.isArray(x.suggestedQuestions) && Array.isArray(x.areas);
+}
+
 export async function getCachedUnderstanding(hash: string): Promise<DataUnderstanding | null> {
-  // 1. Exact hash hit
   const [row] = await pgDb
     .select({ understanding: understandingEmbeddings.understanding })
     .from(understandingEmbeddings)
@@ -28,109 +39,36 @@ export async function getCachedUnderstanding(hash: string): Promise<DataUndersta
     .limit(1)
     .catch(() => [null]);
 
-  if (row) return row.understanding as DataUnderstanding;
-
-  // 2. Semantic similarity fallback — only if VOYAGE_API_KEY is set
-  if (!process.env.VOYAGE_API_KEY) return null;
-  return null; // Will be filled on next setCachedUnderstanding call with embedding
-}
-
-export async function setSimilarUnderstanding(schemaText: string): Promise<DataUnderstanding | null> {
-  if (!process.env.VOYAGE_API_KEY) return null;
-  try {
-    const embedding = await embedText(schemaText);
-    const vectorLiteral = `[${embedding.join(",")}]`;
-
-    const rows = await pgDb.execute<{ understanding: unknown; similarity: number }>(sql`
-      SELECT understanding, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
-      FROM understanding_embeddings
-      WHERE embedding IS NOT NULL
-        AND 1 - (embedding <=> ${vectorLiteral}::vector) >= ${SIMILARITY_THRESHOLD}
-      ORDER BY similarity DESC
-      LIMIT 1
-    `);
-
-    if (rows.rows.length > 0) {
-      return rows.rows[0]!.understanding as DataUnderstanding;
-    }
-  } catch {
-    // Non-fatal — fallback returns null
-  }
-  return null;
+  return row && isCurrentShape(row.understanding) ? row.understanding : null;
 }
 
 export async function setCachedUnderstanding(
   hash: string,
   understanding: DataUnderstanding,
-  schemaText: string = ""
+  schemaText = ""
 ): Promise<void> {
-  let embedding: number[] | null = null;
-  if (process.env.VOYAGE_API_KEY && schemaText) {
-    try {
-      embedding = await embedText(schemaText);
-    } catch {
-      // Non-fatal
-    }
-  }
-
   await pgDb
     .insert(understandingEmbeddings)
-    .values({
-      contentHash: hash,
-      understanding,
-      schemaText,
-      embedding: embedding ?? undefined,
-    })
+    .values({ contentHash: hash, understanding, schemaText })
     .onConflictDoUpdate({
       target: understandingEmbeddings.contentHash,
-      set: {
-        understanding,
-        schemaText,
-        embedding: embedding ?? undefined,
-      },
+      set: { understanding, schemaText },
     })
     .catch((e) => console.warn("Failed to cache understanding:", e));
 }
 
-// Store only the hash reference in the session DB
-export function storeSessionUnderstandingHash(sessionDb: Database, hash: string): void {
-  sessionDb.run(`
-    CREATE TABLE IF NOT EXISTS _session_meta (key TEXT PRIMARY KEY, value TEXT)
-  `);
-  sessionDb.run(
-    "INSERT OR REPLACE INTO _session_meta (key, value) VALUES ('understanding_hash', ?)",
-    [hash]
-  );
-}
-
-/**
- * Read the DataUnderstanding for a session directly from app_sessions.understanding in Postgres.
- * This replaces the old broken sync SQLite hash lookup.
- */
+/** Read the understanding persisted on a session (survives restarts). */
 export async function getSessionUnderstanding(sessionId: string): Promise<DataUnderstanding | null> {
-  try {
-    const [row] = await pgDb
-      .select({ understanding: appSessions.understanding })
-      .from(appSessions)
-      .where(eq(appSessions.id, sessionId))
-      .limit(1)
-      .catch(() => [null]);
-
-    if (row?.understanding) return row.understanding as DataUnderstanding;
-  } catch {
-    // Non-fatal
-  }
-  return null;
+  const [row] = await pgDb
+    .select({ understanding: appSessions.understanding })
+    .from(appSessions)
+    .where(eq(appSessions.id, sessionId))
+    .limit(1)
+    .catch(() => [null]);
+  return row && isCurrentShape(row.understanding) ? row.understanding : null;
 }
 
-/**
- * Persist understanding into app_sessions so it survives restarts.
- * Call this after analyzeData resolves, alongside setCachedUnderstanding.
- */
-export async function persistSessionUnderstanding(
-  sessionId: string,
-  understanding: DataUnderstanding
-): Promise<void> {
+export async function persistSessionUnderstanding(sessionId: string, understanding: DataUnderstanding): Promise<void> {
   await pgDb
     .update(appSessions)
     .set({ understanding })

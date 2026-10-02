@@ -1,65 +1,87 @@
-import { sql, eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db as pgDb } from "./pgClient";
 import { tableEmbeddings } from "./schema";
 import { embedBatch } from "../lib/embeddings";
 import type { TableSchema } from "./schemaReader";
 
 /**
- * Build a rich schema text for a single table — used as the embedding input.
- * Format: "tableName: col1 (TYPE), col2 (TYPE), ... | N rows"
+ * Per-table vector embeddings (pgvector) so that, in a database with hundreds of
+ * tables, a question like "which marketing channel brings the best customers?"
+ * finds `ad_campaigns` + `customers` even though no words match exactly.
  */
+
+const EMBED_CHUNK = 128;
+const inFlight = new Map<string, Promise<void>>();
+
+/** "tableName: col1, col2, … | joins: other_table | N rows" — the embedding input. */
 function tableToSchemaText(table: TableSchema): string {
-  const cols = table.columns.map((c) => `${c.name} (${c.type || "TEXT"})`).join(", ");
-  return `${table.name}: ${cols} | ${table.rowCount} rows`;
+  const cols = table.columns.map((c) => c.name).join(", ");
+  const joins = (table.foreignKeys ?? []).map((fk) => fk.refTable);
+  const joinText = joins.length ? ` | joins: ${[...new Set(joins)].join(", ")}` : "";
+  return `${table.name}: ${cols}${joinText} | ${table.rowCount} rows`;
 }
 
 /**
  * Embed all tables for a session and upsert into table_embeddings.
- * Uses embedBatch for a single Voyage round-trip regardless of table count.
  * Non-fatal — silently skips if VOYAGE_API_KEY is not set.
  */
-export async function upsertTableEmbeddings(
-  sessionId: string,
-  tables: TableSchema[]
-): Promise<void> {
+export async function upsertTableEmbeddings(sessionId: string, tables: TableSchema[]): Promise<void> {
   if (!process.env.VOYAGE_API_KEY || tables.length === 0) return;
 
   try {
-    const schemaTexts = tables.map(tableToSchemaText);
-    const embeddings = await embedBatch(schemaTexts);
+    for (let i = 0; i < tables.length; i += EMBED_CHUNK) {
+      const chunk = tables.slice(i, i + EMBED_CHUNK);
+      const texts = chunk.map(tableToSchemaText);
+      const embeddings = await embedBatch(texts);
+      const rows = chunk
+        .map((t, j) => ({
+          sessionId,
+          tableName: t.name,
+          schemaText: texts[j]!,
+          embedding: embeddings[j]!,
+          rowCount: Math.min(t.rowCount, 2_147_483_647),
+        }))
+        .filter((r) => Array.isArray(r.embedding) && r.embedding.length > 0);
+      if (!rows.length) continue;
 
-    const rows = tables.map((t, i) => ({
-      sessionId,
-      tableName: t.name,
-      schemaText: schemaTexts[i]!,
-      embedding: embeddings[i]!,
-      rowCount: t.rowCount,
-    }));
-
-    // Upsert in a single statement — ON CONFLICT updates embedding + schemaText
-    for (const row of rows) {
       await pgDb
         .insert(tableEmbeddings)
-        .values(row)
+        .values(rows)
         .onConflictDoUpdate({
           target: [tableEmbeddings.sessionId, tableEmbeddings.tableName],
           set: {
-            schemaText: row.schemaText,
-            embedding: row.embedding,
-            rowCount: row.rowCount,
+            schemaText: sql`excluded.schema_text`,
+            embedding: sql`excluded.embedding`,
+            rowCount: sql`excluded.row_count`,
           },
-        })
-        .catch(() => {/* non-fatal per row */});
+        });
     }
-  } catch {
-    // Non-fatal — schema selection degrades to keyword fallback
+  } catch (e) {
+    console.warn("[tableEmbeddings] upsert failed (falling back to keyword search):", e);
   }
 }
 
 /**
+ * Make sure a session has table embeddings, building them in the background if not.
+ * Safe to call on every question — it's a cheap COUNT and de-duplicated per session.
+ */
+export async function ensureTableEmbeddings(sessionId: string, tables: TableSchema[]): Promise<void> {
+  if (!process.env.VOYAGE_API_KEY || tables.length === 0 || inFlight.has(sessionId)) return;
+  try {
+    const res = await pgDb.execute<{ n: number }>(sql`
+      SELECT COUNT(*)::int AS n FROM table_embeddings WHERE session_id = ${sessionId}::uuid
+    `);
+    if ((res.rows[0]?.n ?? 0) >= tables.length * 0.9) return;
+  } catch {
+    return;
+  }
+  const job = upsertTableEmbeddings(sessionId, tables).finally(() => inFlight.delete(sessionId));
+  inFlight.set(sessionId, job);
+}
+
+/**
  * Find the most semantically relevant tables for a query using cosine similarity.
- * Returns up to `limit` TableSchema objects ordered by similarity descending.
- * Falls back to an empty array if no embeddings exist or Voyage is unavailable.
+ * Returns [] if no embeddings exist yet or Voyage is unavailable.
  */
 export async function searchTablesByEmbedding(
   sessionId: string,
@@ -71,22 +93,17 @@ export async function searchTablesByEmbedding(
 
   try {
     const [queryEmbedding] = await embedBatch([queryText]);
-    if (!queryEmbedding) return [];
-
+    if (!queryEmbedding?.length) return [];
     const vectorLiteral = `[${queryEmbedding.join(",")}]`;
 
-    const rows = await pgDb.execute<{ table_name: string; similarity: number }>(sql`
-      SELECT table_name,
-             1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
+    const rows = await pgDb.execute<{ table_name: string }>(sql`
+      SELECT table_name
       FROM table_embeddings
       WHERE session_id = ${sessionId}::uuid
-      ORDER BY similarity DESC
+      ORDER BY embedding <=> ${vectorLiteral}::vector
       LIMIT ${limit}
     `);
 
-    if (!rows.rows.length) return [];
-
-    // Map back to TableSchema objects in similarity order
     const tableMap = new Map(allTables.map((t) => [t.name, t]));
     return rows.rows
       .map((r) => tableMap.get(r.table_name))

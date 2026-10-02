@@ -4,7 +4,6 @@ import { logger } from "hono/logger";
 import { eq } from "drizzle-orm";
 import { uploadRouter } from "./routes/upload";
 import { queryRouter } from "./routes/query";
-import { schemaRouter } from "./routes/schema";
 import { sessionsRouter } from "./routes/sessions";
 import { connectionsRouter } from "./routes/connections";
 import { auth } from "./lib/auth";
@@ -73,7 +72,6 @@ app.use("*", authMiddleware);
 
 app.route("/upload", uploadRouter);
 app.route("/query", queryRouter);
-app.route("/schema", schemaRouter);
 app.route("/sessions", sessionsRouter);
 app.route("/connections", connectionsRouter);
 
@@ -85,4 +83,5 @@ app.onError((err, c) => {
 const port = parseInt(process.env.PORT ?? "3001");
 console.log(`🚀 Clairvoyance backend running on http://localhost:${port}`);
 
-export default { port, idleTimeout: 120, fetch: app.fetch };
+// 255s is Bun's maximum; overview analysis of very large databases can take a while.
+export default { port, idleTimeout: 255, fetch: app.fetch };

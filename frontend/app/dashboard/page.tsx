@@ -1,505 +1,182 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useSession, signOut } from "../lib/authClient";
-import { listSessions, searchSessions, deleteSession, shareSession, revokeShare, type AppSession } from "../lib/api";
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} minute${mins !== 1 ? "s" : ""} ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days !== 1 ? "s" : ""} ago`;
-}
-
-function formatShortDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-// Extract just the DB name from a connection URL, or return the name as-is
-function displayName(name: string): string {
-  try {
-    const url = new URL(name);
-    if (["postgresql:", "postgres:", "mysql:"].includes(url.protocol)) {
-      return url.pathname.replace(/^\//, "") || name;
-    }
-  } catch {}
-  return name;
-}
-
-function SessionIcon({ sourceType, size = "sm" }: { sourceType: "csv" | "database"; size?: "sm" | "lg" }) {
-  const sz = size === "lg" ? "w-12 h-12 rounded-xl" : "w-9 h-9 rounded-lg";
-  if (sourceType === "database") {
-    return (
-      <div className={`${sz} flex items-center justify-center shrink-0`} style={{ backgroundColor: "rgba(74,124,89,0.12)" }}>
-        <svg className={size === "lg" ? "w-6 h-6" : "w-4 h-4"} style={{ color: "#4a7c59" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 2.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
-        </svg>
-      </div>
-    );
-  }
-  return (
-    <div className={`${sz} flex items-center justify-center shrink-0`} style={{ backgroundColor: "rgba(112,92,48,0.1)" }}>
-      <svg className={size === "lg" ? "w-6 h-6" : "w-4 h-4"} style={{ color: "#705c30" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    </div>
-  );
-}
+import AppHeader from "../components/AppHeader";
+import { Button, ErrorNote, Icon, Modal, Spinner } from "../components/ui";
+import { deleteSession, listSessions, revokeShare, searchSessions, shareSession, type AppSession } from "../lib/api";
+import { timeAgo } from "../lib/format";
 
 export default function DashboardPage() {
-  const { data: session } = useSession();
   const router = useRouter();
-  const [allSessions, setAllSessions] = useState<AppSession[]>([]);
-  const [sessions, setSessions] = useState<AppSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
-  const [query, setQuery] = useState("");
+  const [all, setAll] = useState<AppSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [shareModal, setShareModal] = useState<{ sessionId: string; shareUrl: string } | null>(null);
+  const [query, setQuery] = useState("");
+  const [semantic, setSemantic] = useState<AppSession[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [share, setShare] = useState<{ id: string; url: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<AppSession | null>(null);
 
-  const fetchSessions = useCallback(async () => {
-    try {
-      const data = await listSessions();
-      setAllSessions(data);
-      setSessions(data);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    listSessions().then(setAll).catch((e: Error) => setError(e.message));
   }, []);
 
-  useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
-
-  // Debounced semantic search
-  useEffect(() => {
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-
-    if (!query.trim()) {
-      setSessions(allSessions);
-      return;
-    }
-
-    searchTimeoutRef.current = setTimeout(async () => {
+  // Instant name/summary filter, plus semantic search over past questions (when enabled).
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onQuery = (q: string) => {
+    setQuery(q);
+    setSemantic(null);
+    if (timer.current) clearTimeout(timer.current);
+    if (q.trim().length < 3) return;
+    timer.current = setTimeout(async () => {
       setSearching(true);
-      try {
-        const results = await searchSessions(query);
-        setSessions(results.length > 0 ? results : allSessions.filter((s) =>
-          s.name.toLowerCase().includes(query.toLowerCase())
-        ));
-      } catch {
-        // Fall back to client-side filter
-        setSessions(allSessions.filter((s) => s.name.toLowerCase().includes(query.toLowerCase())));
-      } finally {
-        setSearching(false);
-      }
+      try { setSemantic(await searchSessions(q)); } catch { /* keyword filter still applies */ }
+      setSearching(false);
     }, 400);
-  }, [query, allSessions]);
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this session? This cannot be undone.")) return;
-    await deleteSession(id);
-    setAllSessions((prev) => prev.filter((s) => s.id !== id));
-    setSessions((prev) => prev.filter((s) => s.id !== id));
-    setOpenMenu(null);
   };
 
-  const handleShare = async (s: AppSession) => {
-    setOpenMenu(null);
-    if (s.shareToken) {
-      const url = `${window.location.origin}/share/${s.shareToken}`;
-      setShareModal({ sessionId: s.id, shareUrl: url });
-      return;
-    }
-    const { shareUrl } = await shareSession(s.id);
-    setSessions((prev) => prev.map((x) => x.id === s.id ? { ...x, shareToken: shareUrl.split("/share/")[1]! } : x));
-    setShareModal({ sessionId: s.id, shareUrl });
+  const sessions = useMemo(() => {
+    if (!all) return [];
+    const q = query.trim().toLowerCase();
+    if (!q) return all;
+    const local = all.filter((s) => [s.name, s.domain, s.summary].some((t) => t?.toLowerCase().includes(q)));
+    const ids = new Set(local.map((s) => s.id));
+    return [...local, ...(semantic ?? []).filter((s) => !ids.has(s.id))];
+  }, [all, query, semantic]);
+
+  const openShare = useCallback(async (s: AppSession) => {
+    const { shareToken } = await shareSession(s.id);
+    setAll((prev) => prev?.map((x) => (x.id === s.id ? { ...x, shareToken } : x)) ?? prev);
+    setShare({ id: s.id, url: `${window.location.origin}/share/${shareToken}` });
+  }, []);
+
+  const doDelete = async () => {
+    if (!confirmDelete) return;
+    await deleteSession(confirmDelete.id);
+    setAll((prev) => prev?.filter((s) => s.id !== confirmDelete.id) ?? prev);
+    setConfirmDelete(null);
   };
-
-  const handleRevokeShare = async () => {
-    if (!shareModal) return;
-    await revokeShare(shareModal.sessionId);
-    setSessions((prev) => prev.map((x) => x.id === shareModal.sessionId ? { ...x, shareToken: null } : x));
-    setShareModal(null);
-  };
-
-  const handleCopy = () => {
-    if (!shareModal) return;
-    navigator.clipboard.writeText(shareModal.shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  // Close menu on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpenMenu(null);
-      }
-    };
-    if (openMenu) document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [openMenu]);
-
-  const [featured, second, ...rest] = sessions;
-
-  const ThreeDotsMenu = ({ s }: { s: AppSession }) => (
-    <div className="relative" ref={openMenu === s.id ? menuRef : undefined}>
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === s.id ? null : s.id); }}
-        className="p-1.5 rounded-lg transition-colors hover:bg-black/5"
-        style={{ color: "#74796e" }}
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-        </svg>
-      </button>
-      {openMenu === s.id && (
-        <div
-          className="absolute right-0 top-8 z-20 w-40 rounded-xl shadow-lg border overflow-hidden"
-          style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={() => handleShare(s)}
-            className="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-black/5"
-            style={{ color: "#2e3230" }}
-          >
-            Share
-          </button>
-          <button
-            onClick={() => handleDelete(s.id)}
-            className="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-red-50"
-            style={{ color: "#C0392B" }}
-          >
-            Delete
-          </button>
-        </div>
-      )}
-    </div>
-  );
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#F2EDE3" }}>
-      {/* Nav */}
-      <nav
-        className="px-6 py-4 flex items-center justify-between border-b"
-        style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
-      >
-        <div className="flex items-center gap-2.5">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ backgroundColor: "#4a7c59" }}
-          >
-            <svg className="w-4 h-4" style={{ color: "#3D2B0E" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            </svg>
-          </div>
-          <span className="font-semibold" style={{ color: "#2e3230" }}>Clairvoyance</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm" style={{ color: "#74796e" }}>{session?.user.email}</span>
-          <button
-            onClick={() => router.push("/")}
-            className="text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-            style={{ backgroundColor: "#1e4d2b", color: "#ffffff" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#163a20")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#1e4d2b")}
-          >
-            + New Analysis
-          </button>
-          <button
-            onClick={() => signOut().then(() => router.push("/sign-in"))}
-            className="text-sm transition-colors"
-            style={{ color: "#74796e" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "#2e3230")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "#74796e")}
-          >
-            Sign out
-          </button>
-        </div>
-      </nav>
-
-      {/* Content */}
-      <main className="max-w-6xl mx-auto px-6 py-10">
-        {/* Header row */}
-        <div className="mb-8 flex items-start justify-between">
+    <div className="min-h-screen">
+      <AppHeader />
+      <main className="mx-auto max-w-6xl px-4 pb-20 pt-10 sm:px-6">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight" style={{ color: "#2e3230", fontFamily: "Georgia, 'Times New Roman', serif" }}>
-              Your Sessions
-            </h1>
-            <p className="text-sm mt-1.5" style={{ color: "#4a4e4a" }}>
-              Pick up where you left off or start a new analysis.
-            </p>
+            <h1 className="text-[30px] font-semibold tracking-tight text-ink">My analyses</h1>
+            <p className="mt-1 text-[15px] text-ink-2">Pick up where you left off, or start something new.</p>
           </div>
-          {/* Search */}
-          <div className="relative">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search sessions…"
-              className="w-64 rounded-xl pl-9 pr-4 py-2.5 text-sm outline-none transition-all border"
-              style={{
-                backgroundColor: "#faf6f0",
-                borderColor: "#E0D5C5",
-                color: "#2e3230",
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = "#4a7c59")}
-              onBlur={(e) => (e.currentTarget.style.borderColor = "#E0D5C5")}
-            />
-            <div className="absolute left-3 top-3">
-              {searching ? (
-                <div className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#4a7c59", borderTopColor: "transparent" }} />
-              ) : (
-                <svg className="w-3.5 h-3.5" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              )}
-            </div>
+          <div className="flex gap-2">
+            <label className="flex h-10 w-full items-center gap-2 rounded-xl border border-line bg-surface px-3 focus-within:border-brand/60 sm:w-72">
+              {searching ? <Spinner className="h-3.5 w-3.5 text-ink-3" /> : <Icon name="search" className="h-4 w-4 text-ink-3" />}
+              <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search analyses and past questions"
+                className="w-full bg-transparent text-sm outline-none placeholder:text-ink-3" />
+            </label>
+            <Button variant="primary" onClick={() => router.push("/")} className="shrink-0"><Icon name="plus" /> New</Button>
           </div>
         </div>
 
-        {/* Loading */}
-        {loading && (
-          <div className="flex items-center justify-center py-24">
-            <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#4a7c59", borderTopColor: "transparent" }} />
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {!all && !error && <div className="flex justify-center py-24 text-brand"><Spinner className="h-6 w-6" /></div>}
+
+        {all && all.length === 0 && (
+          <div className="mx-auto max-w-md rounded-2xl border border-dashed border-line-strong bg-surface-2 px-8 py-14 text-center">
+            <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-brand-soft text-brand"><Icon name="sparkle" className="h-6 w-6" /></span>
+            <p className="text-lg font-semibold text-ink">No analyses yet</p>
+            <p className="mt-1 text-sm text-ink-2">Upload a spreadsheet or connect a database to ask your first question.</p>
+            <Button variant="primary" className="mt-5" onClick={() => router.push("/")}>Get started</Button>
           </div>
         )}
 
-        {/* Error */}
-        {error && (
-          <p className="text-sm rounded-xl px-4 py-3 border" style={{ color: "#C0392B", backgroundColor: "#FEF2F0", borderColor: "#F5C6C0" }}>{error}</p>
+        {all && all.length > 0 && sessions.length === 0 && (
+          <p className="py-16 text-center text-sm text-ink-3">Nothing matches “{query}”.</p>
         )}
 
-        {/* Empty state */}
-        {!loading && sessions.length === 0 && (
-          <div className="text-center py-24 space-y-4">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto" style={{ backgroundColor: "#e8e0d4" }}>
-              <svg className="w-7 h-7" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-              </svg>
-            </div>
-            <p className="text-sm" style={{ color: "#74796e" }}>No sessions yet.</p>
-            <button
-              onClick={() => router.push("/")}
-              className="text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
-              style={{ backgroundColor: "#4a7c59", color: "#3D2B0E" }}
-            >
-              Upload your first dataset
-            </button>
-          </div>
-        )}
-
-        {/* Sessions grid */}
-        {!loading && sessions.length > 0 && (
-          <>
-            {/* Top row: featured (2/3) + second card (1/3) */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              {/* Featured card */}
-              {featured && (
-                <div
-                  className="col-span-2 rounded-2xl overflow-hidden border relative"
-                  style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
-                >
-                  {/* Preview strip on right */}
-                  <div
-                    className="absolute right-0 top-0 bottom-0 w-56 pointer-events-none"
-                    style={{ background: "linear-gradient(to left, #E0D4C0 0%, #EDE6D8 60%, transparent 100%)" }}
-                  />
-                  <div className="relative p-6 flex flex-col h-full min-h-[220px]">
-                    <div className="flex items-start gap-4">
-                      <SessionIcon sourceType={featured.sourceType} size="lg" />
-                      <div className="flex-1 min-w-0 pr-48">
-                        <h2 className="text-xl font-bold leading-snug truncate" style={{ color: "#2e3230" }}>
-                          {displayName(featured.name)}
-                        </h2>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <svg className="w-3.5 h-3.5 shrink-0" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            {featured.sourceType === "database"
-                              ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-                              : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                            }
-                          </svg>
-                          <span className="text-sm truncate" style={{ color: "#74796e" }}>
-                            {featured.sourceType === "database" ? "database" : "csv file"}
-                          </span>
-                        </div>
-                      </div>
-                      <ThreeDotsMenu s={featured} />
-                    </div>
-
-                    {/* Tags */}
-                    {featured.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-5">
-                        {featured.tags.map((tag, i) => (
-                          <span
-                            key={tag}
-                            className="text-xs px-3 py-1 rounded-full border font-medium"
-                            style={i === featured.tags.length - 1 && featured.tags.length > 1
-                              ? { backgroundColor: "#F5ECD8", borderColor: "#DFC89A", color: "#7A5220" }
-                              : { backgroundColor: "#eae6de", borderColor: "#D8D0C4", color: "#5C5248" }
-                            }
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                        {featured.shareToken && (
-                          <span className="text-xs px-3 py-1 rounded-full border font-medium" style={{ backgroundColor: "#EDF5F0", borderColor: "#AEDCC0", color: "#2E7D52" }}>
-                            Shared
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Footer: last active + open button */}
-                    <div className="flex items-center justify-between mt-auto pt-5">
-                      <div className="flex items-center gap-1.5">
-                        <svg className="w-3.5 h-3.5" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span className="text-xs" style={{ color: "#74796e" }}>Last active: {timeAgo(featured.updatedAt)}</span>
-                      </div>
-                      <button
-                      onClick={() => router.push(`/session/${featured.id}`)}
-                        className="text-xs font-medium px-4 py-2 rounded-lg transition-colors"
-                        style={{ backgroundColor: "#e8e0d4", color: "#5C4A35" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#DDD0BF")}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#e8e0d4")}
-                      >
-                        Open →
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Second card (compact) */}
-              {second && (
-                <div
-                  className="rounded-2xl border p-5 flex flex-col cursor-pointer transition-all hover:shadow-sm overflow-hidden"
-                  style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
-                  onClick={() => router.push(`/session/${second.id}`)}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <SessionIcon sourceType={second.sourceType} />
-                    <ThreeDotsMenu s={second} />
-                  </div>
-                  <h3 className="font-bold text-base leading-snug truncate" style={{ color: "#2e3230" }}>{displayName(second.name)}</h3>
-                  <div className="flex items-center gap-1.5 mt-1.5">
-                    <svg className="w-3.5 h-3.5 shrink-0" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                    </svg>
-                    <span className="text-sm truncate" style={{ color: "#74796e" }}>
-                      {second.sourceType === "database" ? "database" : "csv file"}
-                    </span>
-                  </div>
-                  <div className="mt-auto pt-4 flex items-center justify-between">
-                    <div className="flex flex-wrap gap-1.5">
-                      {second.tags.slice(0, 2).map((tag) => (
-                        <span key={tag} className="text-xs px-2.5 py-0.5 rounded-full border" style={{ backgroundColor: "#eae6de", borderColor: "#D8D0C4", color: "#5C5248" }}>
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                    <span className="text-xs shrink-0" style={{ color: "#74796e" }}>{formatShortDate(second.updatedAt)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Remaining sessions in 3-col grid */}
-            {rest.length > 0 && (
-              <div className="grid grid-cols-3 gap-4">
-                {rest.map((s) => (
-                  <div
-                    key={s.id}
-                    className="rounded-2xl border p-5 flex flex-col cursor-pointer transition-all hover:shadow-sm overflow-hidden"
-                    style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
-                    onClick={() => router.push(`/session/${s.id}`)}
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <SessionIcon sourceType={s.sourceType} />
-                      <ThreeDotsMenu s={s} />
-                    </div>
-                    <h3 className="font-bold text-base leading-snug truncate" style={{ color: "#2e3230" }}>{displayName(s.name)}</h3>
-                    <div className="flex items-center gap-1.5 mt-1.5">
-                      <svg className="w-3.5 h-3.5 shrink-0" style={{ color: "#74796e" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                      </svg>
-                      <span className="text-sm truncate" style={{ color: "#74796e" }}>
-                        {s.sourceType === "database" ? "database" : "csv file"}
-                      </span>
-                    </div>
-                    <div className="mt-auto pt-4 flex items-center justify-between">
-                      <div className="flex flex-wrap gap-1.5">
-                        {s.tags.slice(0, 2).map((tag) => (
-                          <span key={tag} className="text-xs px-2.5 py-0.5 rounded-full border" style={{ backgroundColor: "#eae6de", borderColor: "#D8D0C4", color: "#5C5248" }}>
-                            {tag}
-                          </span>
-                        ))}
-                        {s.shareToken && (
-                          <span className="text-xs px-2.5 py-0.5 rounded-full border" style={{ backgroundColor: "#EDF5F0", borderColor: "#AEDCC0", color: "#2E7D52" }}>
-                            Shared
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-xs shrink-0" style={{ color: "#74796e" }}>{formatShortDate(s.updatedAt)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {sessions.map((s) => (
+            <SessionCard key={s.id} s={s} onShare={() => openShare(s)} onDelete={() => setConfirmDelete(s)} />
+          ))}
+        </div>
       </main>
 
-      {/* Share modal */}
-      {shareModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4" onClick={() => setShareModal(null)}>
-          <div
-            className="rounded-2xl p-6 w-full max-w-md space-y-4 border shadow-xl"
-            style={{ backgroundColor: "#faf6f0", borderColor: "#e8e0d4" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="font-bold text-lg" style={{ color: "#2e3230" }}>Share session</h2>
-            <p className="text-sm" style={{ color: "#4a4e4a" }}>Anyone with this link can view this session in read-only mode.</p>
-            <div className="flex gap-2">
-              <input
-                readOnly
-                value={shareModal.shareUrl}
-                className="flex-1 rounded-lg px-3 py-2 text-sm min-w-0 border outline-none"
-                style={{ backgroundColor: "#F2EDE3", borderColor: "#E0D5C5", color: "#2e3230" }}
-              />
-              <button
-                onClick={handleCopy}
-                className="shrink-0 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                style={{ backgroundColor: "#4a7c59", color: "#3D2B0E" }}
-              >
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <div className="flex justify-between pt-1">
-              <button onClick={handleRevokeShare} className="text-sm transition-colors" style={{ color: "#C0392B" }}>
-                Revoke access
-              </button>
-              <button onClick={() => setShareModal(null)} className="text-sm transition-colors" style={{ color: "#4a4e4a" }}>
-                Done
-              </button>
-            </div>
-          </div>
+      <Modal open={!!share} onClose={() => setShare(null)} title="Share this analysis">
+        <p className="mb-4 text-sm text-ink-2">Anyone with the link can read the questions and answers.</p>
+        <div className="flex gap-2">
+          <input readOnly value={share?.url ?? ""} onFocus={(e) => e.target.select()}
+            className="min-w-0 flex-1 rounded-xl border border-line bg-sunken px-3 py-2 text-sm text-ink outline-none" />
+          <Button variant="primary" onClick={() => { navigator.clipboard.writeText(share?.url ?? ""); setCopied(true); setTimeout(() => setCopied(false), 1800); }}>
+            {copied ? "Copied" : "Copy link"}
+          </Button>
         </div>
-      )}
+        <div className="mt-5 flex justify-between">
+          <Button variant="danger" size="sm" onClick={async () => {
+            if (!share) return;
+            await revokeShare(share.id);
+            setAll((prev) => prev?.map((x) => (x.id === share.id ? { ...x, shareToken: null } : x)) ?? prev);
+            setShare(null);
+          }}>Turn off link</Button>
+          <Button variant="ghost" size="sm" onClick={() => setShare(null)}>Done</Button>
+        </div>
+      </Modal>
+
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete this analysis?">
+        <p className="text-sm text-ink-2">
+          “{confirmDelete?.name}” and its conversation will be deleted. {confirmDelete?.sourceType === "csv" ? "The uploaded file is removed too." : "Your database itself is not affected."}
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button variant="primary" className="!bg-danger hover:!bg-danger/90" onClick={doDelete}>Delete</Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function SessionCard({ s, onShare, onDelete }: { s: AppSession; onShare: () => void; onDelete: () => void }) {
+  const [menu, setMenu] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setMenu(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menu]);
+
+  return (
+    <div className="group relative flex flex-col rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-card)] transition-colors hover:border-line-strong">
+      <Link href={`/session/${s.id}`} className="absolute inset-0 rounded-2xl" aria-label={`Open ${s.name}`} />
+      <div className="flex items-start justify-between gap-3">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${s.sourceType === "database" ? "bg-brand-soft text-brand" : "bg-accent-soft text-accent"}`}>
+          <Icon name={s.sourceType === "database" ? "database" : "file"} className="h-[18px] w-[18px]" />
+        </span>
+        <div className="relative z-10" ref={ref}>
+          <button onClick={() => setMenu((m) => !m)} aria-label="More actions"
+            className="rounded-lg p-1.5 text-ink-3 opacity-70 hover:bg-sunken hover:text-ink group-hover:opacity-100">
+            <Icon name="dots" className="h-5 w-5" />
+          </button>
+          {menu && (
+            <div className="absolute right-0 top-9 w-40 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-[var(--shadow-pop)]">
+              <button onClick={() => { setMenu(false); onShare(); }} className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm text-ink hover:bg-sunken">
+                <Icon name="share" /> Share
+              </button>
+              <button onClick={() => { setMenu(false); onDelete(); }} className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm text-danger hover:bg-danger-soft">
+                <Icon name="trash" /> Delete
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <h2 className="mt-3 truncate font-sans text-[16px] font-semibold text-ink">{s.name}</h2>
+      {s.domain && <p className="mt-0.5 text-[13px] font-semibold text-brand">{s.domain}</p>}
+      <p className="mt-2 line-clamp-2 min-h-[40px] text-[13px] leading-relaxed text-ink-3">
+        {s.summary ?? (s.sourceType === "database" ? "Live database connection" : "Uploaded spreadsheet")}
+      </p>
+      <div className="mt-4 flex items-center justify-between text-xs text-ink-3">
+        <span>{s.questionCount ? `${s.questionCount} question${s.questionCount === 1 ? "" : "s"}` : "No questions yet"} · {timeAgo(s.updatedAt)}</span>
+        {s.shareToken && <span className="rounded-full bg-brand-soft px-2 py-0.5 font-semibold text-brand-strong">Shared</span>}
+      </div>
     </div>
   );
 }

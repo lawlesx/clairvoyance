@@ -1,224 +1,104 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { requireSessionEntry } from "../db/manager";
-import { runAgent } from "../agents/orchestrator";
-import type { StreamEvent } from "../agents/orchestrator";
-import { db as pgDb } from "../db/pgClient";
-import { messages, appSessions, dataConnections } from "../db/schema";
 import { eq } from "drizzle-orm";
-import { getConnector } from "../db/connectors/index";
-import type { SqlDialect } from "../agents/guardrails";
+import { runAgent, type HistoryTurn, type StreamEvent } from "../agents/orchestrator";
+import { answerToMarkdown, type AnswerPayload } from "../agents/visual";
 import type { DataUnderstanding } from "../agents/dataAnalyst";
+import { db as pgDb } from "../db/pgClient";
+import { appSessions, messages } from "../db/schema";
+import { getOwnedSession, loadDataSource, SourceError } from "../db/dataSource";
+import { getSessionUnderstanding } from "../db/understandingCache";
+import type { AppEnv } from "../types";
 
-export const queryRouter = new Hono();
+export const queryRouter = new Hono<AppEnv>();
 
-async function resolveSession(sessionId: string) {
-  const [appSession] = await pgDb
-    .select({
-      sourceType: appSessions.sourceType,
-      connectionId: appSessions.connectionId,
-      understanding: appSessions.understanding,
-    })
-    .from(appSessions)
-    .where(eq(appSessions.id, sessionId))
-    .limit(1)
-    .catch(() => [null]);
-
-  return appSession ?? null;
+interface QueryBody {
+  sessionId?: string;
+  question?: string;
+  history?: HistoryTurn[];
 }
 
-// Streaming endpoint — emits SSE events as the agent works
-queryRouter.post("/stream", async (c) => {
-  const body = await c.req.json() as {
-    sessionId: string;
-    question: string;
-    history?: Array<{ role: "user" | "assistant"; content: string }>;
-  };
+async function persistTurn(sessionId: string, question: string, answer: AnswerPayload) {
+  try {
+    const markdown = answerToMarkdown(answer);
+    let embeddings: number[][] = [];
+    if (process.env.VOYAGE_API_KEY) {
+      const { embedBatch } = await import("../lib/embeddings");
+      embeddings = await embedBatch([question, markdown]).catch(() => []);
+    }
+    await pgDb.insert(messages).values([
+      { sessionId, role: "user", content: { text: question }, embedding: embeddings[0] },
+      // `answer` (markdown) is kept for search and for older clients.
+      { sessionId, role: "assistant", content: { ...answer, answer: markdown }, embedding: embeddings[1] },
+    ]);
+    await pgDb.update(appSessions).set({ updatedAt: new Date() }).where(eq(appSessions.id, sessionId));
+  } catch (e) {
+    console.warn("Failed to persist messages:", e);
+  }
+}
 
-  const { sessionId, question, history = [] } = body;
+// Streaming endpoint — emits SSE status events while the agent works, then the answer.
+queryRouter.post("/stream", async (c) => {
+  const user = c.get("user");
+  const { sessionId, question, history = [] } = (await c.req.json().catch(() => ({}))) as QueryBody;
   if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
   if (!question?.trim()) return c.json({ error: "question is required" }, 400);
 
-  const appSession = await resolveSession(sessionId);
-  const isLiveDb = appSession?.sourceType === "database" && appSession.connectionId;
+  const session = await getOwnedSession(sessionId, user.id);
+  if (!session) return c.json({ error: "Session not found" }, 404);
 
-  let entry: ReturnType<typeof requireSessionEntry> | null = null;
-  let liveConnector = undefined;
-  let sqlDialect: SqlDialect = "SQLite";
-
-  if (isLiveDb) {
-    // For live DB sessions, look up the connection config from Postgres
-    const [conn] = await pgDb
-      .select()
-      .from(dataConnections)
-      .where(eq(dataConnections.id, appSession.connectionId!))
-      .limit(1);
-
-    if (!conn) return c.json({ error: "Connection not found" }, 404);
-
-    const { decryptPassword } = await import("../lib/crypto");
-    const password = decryptPassword(conn.encryptedPassword);
-
-    liveConnector = getConnector({
-      id: conn.id,
-      dbType: conn.dbType as "postgresql" | "mysql",
-      host: conn.host,
-      port: conn.port,
-      dbName: conn.dbName,
-      username: conn.username,
-      password,
-      sslMode: conn.sslMode ?? undefined,
-    });
-    sqlDialect = conn.dbType === "postgresql" ? "PostgresQL" : "MySQL";
-  } else {
-    try {
-      entry = requireSessionEntry(sessionId);
-    } catch {
-      return c.json({ error: "Session not found. Please upload your data first." }, 404);
-    }
+  let source;
+  try {
+    source = await loadDataSource(session);
+  } catch (e) {
+    if (e instanceof SourceError) return c.json({ error: e.message }, e.status);
+    return c.json({ error: `Couldn't reach your data: ${(e as Error).message}` }, 502);
   }
-
-  const db = entry?.db ?? null;
-  const schema = entry?.schema;
-  // Use cached understanding from in-memory map first; fall back to Postgres-persisted value
-  const understanding = (entry?.understanding ?? appSession?.understanding ?? null) as DataUnderstanding | undefined;
+  const understanding =
+    (await getSessionUnderstanding(sessionId)) ?? undefined;
 
   return streamSSE(c, async (stream) => {
+    const controller = new AbortController();
+    // Keep proxies and the connection from timing out during long model turns.
+    const heartbeat = setInterval(() => { stream.write(": keep-alive\n\n").catch(() => {}); }, 15_000);
+    stream.onAbort(() => { controller.abort(); clearInterval(heartbeat); });
     const emit = async (event: StreamEvent) => {
-      await stream.writeSSE({ data: JSON.stringify(event), event: event.type });
+      if (!controller.signal.aborted) await stream.writeSSE({ data: JSON.stringify(event), event: event.type });
     };
 
     try {
-      const result = await runAgent(db, question, history, emit, schema, understanding, liveConnector, sqlDialect, sessionId);
-
-      // Persist messages to Postgres (best-effort — don't fail the stream if this errors)
-      try {
-        // Embed both the user question and assistant answer in one Voyage call
-        let userEmbedding: number[] | undefined;
-        let assistantEmbedding: number[] | undefined;
-
-        if (process.env.VOYAGE_API_KEY && result.answer) {
-          const { embedBatch } = await import("../lib/embeddings");
-          const embeddings = await embedBatch([question, result.answer]).catch(() => []);
-          userEmbedding = embeddings[0];
-          assistantEmbedding = embeddings[1];
-        }
-
-        await pgDb.insert(messages).values([
-          {
-            sessionId,
-            role: "user",
-            content: { text: question },
-            embedding: userEmbedding,
-          },
-          {
-            sessionId,
-            role: "assistant",
-            content: {
-              answer: result.answer,
-              sql: result.sql,
-              data: result.data as any,
-              chart: result.chart,
-              clarificationNeeded: result.clarificationNeeded,
-            },
-            embedding: assistantEmbedding,
-          },
-        ]);
-      } catch (persistErr) {
-        console.warn("Failed to persist messages:", persistErr);
-      }
-    } catch (e: any) {
-      await emit({ type: "error", message: e.message });
+      const answer = await runAgent({
+        question: question.trim(),
+        history: sanitizeHistory(history),
+        source,
+        understanding: understanding as DataUnderstanding | undefined,
+        sessionId,
+        onEvent: emit,
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted) await persistTurn(sessionId, question.trim(), answer);
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      console.error("[query] agent failed:", e);
+      await emit({ type: "error", message: friendlyError(e) });
       await emit({ type: "done" });
+    } finally {
+      clearInterval(heartbeat);
     }
   });
 });
 
-// Non-streaming fallback
-queryRouter.post("/", async (c) => {
-  const body = await c.req.json() as {
-    sessionId: string;
-    question: string;
-    history?: Array<{ role: "user" | "assistant"; content: string }>;
-  };
+function sanitizeHistory(history: unknown): HistoryTurn[] {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((h): h is HistoryTurn => !!h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string")
+    .map((h) => ({ role: h.role, content: h.content.slice(0, 4000), sql: typeof h.sql === "string" ? h.sql.slice(0, 4000) : undefined }));
+}
 
-  const { sessionId, question, history = [] } = body;
-  if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
-  if (!question?.trim()) return c.json({ error: "question is required" }, 400);
-
-  const appSession = await resolveSession(sessionId);
-  const isLiveDb = appSession?.sourceType === "database" && appSession.connectionId;
-
-  let entry: ReturnType<typeof requireSessionEntry> | null = null;
-  let liveConnector = undefined;
-  let sqlDialect: SqlDialect = "SQLite";
-
-  if (isLiveDb) {
-    const [conn] = await pgDb
-      .select()
-      .from(dataConnections)
-      .where(eq(dataConnections.id, appSession.connectionId!))
-      .limit(1);
-
-    if (!conn) return c.json({ error: "Connection not found" }, 404);
-
-    const { decryptPassword } = await import("../lib/crypto");
-    const password = decryptPassword(conn.encryptedPassword);
-
-    liveConnector = getConnector({
-      id: conn.id,
-      dbType: conn.dbType as "postgresql" | "mysql",
-      host: conn.host,
-      port: conn.port,
-      dbName: conn.dbName,
-      username: conn.username,
-      password,
-      sslMode: conn.sslMode ?? undefined,
-    });
-    sqlDialect = conn.dbType === "postgresql" ? "PostgresQL" : "MySQL";
-  } else {
-    try {
-      entry = requireSessionEntry(sessionId);
-    } catch {
-      return c.json({ error: "Session not found. Please upload your data first." }, 404);
-    }
-  }
-
-  const db = entry?.db ?? null;
-  const understanding = (entry?.understanding ?? appSession?.understanding ?? null) as DataUnderstanding | undefined;
-  const result = await runAgent(db, question, history, undefined, entry?.schema, understanding, liveConnector, sqlDialect, sessionId);
-
-  // Persist messages to Postgres (best-effort) — embed both messages in one Voyage call
-  try {
-    let userEmbedding: number[] | undefined;
-    let assistantEmbedding: number[] | undefined;
-
-    if (process.env.VOYAGE_API_KEY && result.answer) {
-      const { embedBatch } = await import("../lib/embeddings");
-      const embeddings = await embedBatch([question, result.answer]).catch(() => []);
-      userEmbedding = embeddings[0];
-      assistantEmbedding = embeddings[1];
-    }
-
-    await pgDb.insert(messages).values([
-      { sessionId, role: "user", content: { text: question }, embedding: userEmbedding },
-      {
-        sessionId,
-        role: "assistant",
-        content: {
-          answer: result.answer,
-          sql: result.sql,
-          data: result.data as any,
-          chart: result.chart,
-          clarificationNeeded: result.clarificationNeeded,
-        },
-        embedding: assistantEmbedding,
-      },
-    ]);
-  } catch (persistErr) {
-    console.warn("Failed to persist messages:", persistErr);
-  }
-
-  return c.json(result);
-});
-
+function friendlyError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/api key|authentication|401/i.test(msg)) return "The AI service isn't configured correctly (check ANTHROPIC_API_KEY on the server).";
+  if (/rate limit|429|overloaded|529/i.test(msg)) return "The AI service is busy right now. Please try again in a moment.";
+  if (/ECONNREFUSED|ENOTFOUND|timeout|ETIMEDOUT/i.test(msg)) return "Couldn't reach your database. Check that it's online and try again.";
+  return "Something went wrong while answering. Please try again.";
+}

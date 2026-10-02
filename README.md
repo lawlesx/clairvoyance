@@ -1,65 +1,42 @@
 # Clairvoyance
 
-**Ask questions about any structured dataset in plain English.**
+**Ask your data anything — in plain English.**
 
-No SQL. No filters. No technical knowledge required — upload a CSV or connect a live database and start asking.
+Upload a spreadsheet or connect a database, then ask questions the way you'd ask an analyst: *"How did revenue trend this year?"*, *"Is discount size related to order value?"*, *"Which regions are slipping?"*. You get a one-sentence answer, a few useful takeaways, and the right chart (or no chart, when a number says it all). No SQL, and no need to know how the data is organised.
 
----
-
-## How It Works
-
-```
-Sign in  →  Upload CSV (or connect DB)  →  AI analyses data  →  Ask questions  →  Answer + chart
-```
-
-**1. Sign in** — Create an account (email/password or OAuth). Sessions are saved and resumable across devices.
-
-**2. Upload or connect** — Drop one or more CSV files, or connect a live PostgreSQL/MySQL database directly. Data stays where it is — Clairvoyance only holds metadata.
-
-**3. AI understands your data** — Claude reads the schema and sample rows, then returns:
-- What the dataset is about (domain, summary)
-- Which columns matter and why (importance-ranked)
-- 6–8 suggested questions tailored to your specific data
-- Understanding is cached by content hash (exact) and schema similarity (semantic) — re-uploading the same data is instant
-
-**4. Ask a question** — Type freely or click a suggestion. The agent runs:
-
-```
-read_schema → generate_sql → execute_query → choose_visualization
-```
-
-**5. Live thinking** — Watch each step in real time. See the SQL being written and executed before the answer arrives.
-
-**6. Answer + chart** — Markdown answer with an auto-selected chart when it genuinely helps.
-
-**7. Sessions persist** — All messages are saved. Resume any session from the dashboard. Insights and suggested questions are restored automatically on resume (from the understanding cache for CSV sessions; re-analysed in the background for live-DB sessions). Share a read-only link with anyone.
+Built for product managers, business analysts and anyone else who has questions but not the database diagram.
 
 ---
 
-## User Flow
+## How it works
+
+```
+Sign in → Upload CSV or connect a database → Clairvoyance gets to know the data → Ask → Answer + chart
+```
+
+1. **Bring data.** Drop one or more CSV files, or connect PostgreSQL / MySQL by pasting a connection string (or filling in a short form). Saved databases are one click next time.
+2. **Clairvoyance gets to know it** — in the background, so you can start asking immediately. It writes a plain-language summary, lists the business concepts it found ("Order value", "Signup date"), and suggests questions. Big databases (hundreds of tables) are grouped into topic areas first.
+3. **Ask.** Type a question or click a suggestion. While it works you see plain progress ("Looking for the right data", "Crunching the numbers") and can stop at any time.
+4. **Get an answer you can use:**
+   - a **headline** that answers the question with the key numbers formatted (`$1.2M`, `34%`)
+   - up to three **takeaways** that add something the headline doesn't
+   - a **visual chosen for the question** — trend line, ranked bars, share donut, scatter with relationship strength, headline-number tiles, or a table — with friendly labels and a Chart/Table toggle
+   - **"How I worked this out"** in one plain sentence (the SQL is one more click away for technical readers)
+   - **follow-up questions** to keep exploring; follow-ups build on the previous answer
+5. **Keep and share.** Every analysis is saved. Share a read-only link, download CSV (opens in Excel) or the chart as an image.
 
 ```mermaid
 graph LR
-    A([Sign in]) --> B([Upload CSV\nor Connect DB])
-    B --> C[AI analyses\nschema & samples]
-    C --> D{Cache hit?}
-    D -- Exact ⚡ --> E[Show insights\ninstantly]
-    D -- Semantic ⚡ --> E
-    D -- Miss --> F[Claude analyses\ndata] --> E
-    E --> G([User asks\na question])
-    G --> H[read_schema]
-    H --> I[generate_sql]
-    I --> J[execute_query]
-    J --> K[choose_visualization]
-    K --> L([Answer + chart])
-    L --> N{Chart\nrefinement?}
-    N -- NL or switcher --> O[Re-render\nclient-side]
-    N -- New question --> G
-    O --> G
-    E --> M([Dashboard\nsaved sessions])
-    M --> P{Resume\nsession}
-    P -- CSV: cache hit --> E
-    P -- DB or cache miss --> Q[analyzeSession\nbackground call] --> E
+    A([Sign in]) --> B([Upload CSV<br/>or connect DB])
+    B --> C[Background: summary,<br/>concepts, suggestions]
+    B --> G([Ask a question])
+    C -.-> G
+    G --> H[Find relevant tables]
+    H --> I[Check values if unsure]
+    I --> J[Run read-only query]
+    J --> K[Present: headline, takeaways,<br/>visual, method, follow-ups]
+    K --> L[Visual checked against<br/>real data]
+    L --> M([Answer card])
     M --> G
 ```
 
@@ -69,24 +46,24 @@ graph LR
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 16, React, Tailwind CSS, Recharts, react-resizable-panels |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4, Recharts 3 |
 | Backend | Bun + Hono (TypeScript) |
-| Auth | Better Auth (email/password + Google/GitHub OAuth) |
-| AI Agent | Anthropic Claude `claude-sonnet-4-6` (tool-use) |
+| Auth | Better Auth (email/password + optional Google/GitHub OAuth) |
+| AI | Anthropic Claude via `@anthropic-ai/sdk` — `claude-opus-5-5` by default (`CLAIRVOYANCE_MODEL`) |
 | Embeddings | Voyage AI `voyage-3-lite` (1024-dim, optional) |
-| Metadata DB | PostgreSQL 16 + pgvector + Drizzle ORM |
-| Session Data | SQLite via `bun:sqlite` (per-session, zero config) |
-| DB Connectors | `pg` (PostgreSQL), `mysql2` (MySQL) |
-| SQL Safety | `node-sql-parser` — SELECT-only, AST-validated, multi-dialect |
+| Metadata DB | PostgreSQL 16 + **pgvector** + Drizzle ORM |
+| Uploaded data | SQLite via `bun:sqlite` (one file per analysis) |
+| DB connectors | `pg` (PostgreSQL), `mysql2` (MySQL) |
+| SQL safety | `node-sql-parser` (SELECT-only, AST-validated) + read-only transactions |
 | Streaming | Server-Sent Events (Hono `streamSSE`) |
 
 ---
 
-## Getting Started
+## Getting started
 
 ### Prerequisites
 - [Bun](https://bun.sh) ≥ 1.0
-- [Docker](https://www.docker.com) (for the Postgres metadata database)
+- [Docker](https://www.docker.com) (for the Postgres metadata database) — or any Postgres 16 with the `vector` extension available
 - An [Anthropic API key](https://console.anthropic.com)
 
 ### 1. Start PostgreSQL
@@ -95,17 +72,16 @@ graph LR
 docker compose up -d
 ```
 
-This starts a PostgreSQL 16 instance with pgvector on **port 5433** (avoids conflicts with any existing local Postgres on 5432).
+Starts PostgreSQL 16 with pgvector on **port 5433**.
 
 ### 2. Backend
 
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env — required: ANTHROPIC_API_KEY, BETTER_AUTH_SECRET
-# Optional: VOYAGE_API_KEY (enables semantic search)
+# Edit .env — required: ANTHROPIC_API_KEY, BETTER_AUTH_SECRET, CREDENTIAL_ENCRYPTION_KEY
 bun install
-bunx drizzle-kit migrate   # create all tables
+bunx drizzle-kit migrate   # creates all tables (and enables the vector extension)
 bun run dev                # → http://localhost:3001
 ```
 
@@ -114,289 +90,149 @@ bun run dev                # → http://localhost:3001
 ```bash
 cd frontend
 bun install
-cp .env.local.example .env.local
 bun run dev                # → http://localhost:3000
 ```
 
-### Both at once (from project root)
+Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if the backend isn't on `http://localhost:3001`.
+
+### Both at once (from the project root)
 
 ```bash
-bun run dev        # starts backend + frontend in parallel
+bun run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+### Checks
+
+```bash
+cd backend && bun test && bun run typecheck
+cd frontend && bun run lint && bun run build
+```
 
 ### Environment variables
 
-**`backend/.env`** (required)
+**Required** (`backend/.env`)
 
 | Variable | Description |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key |
-| `DATABASE_URL` | Postgres connection string (default: `postgres://clairvoyance:clairvoyance@localhost:5433/clairvoyance`) |
-| `BETTER_AUTH_SECRET` | Random secret for session signing (min 32 chars) |
-| `CREDENTIAL_ENCRYPTION_KEY` | 64-char hex key for encrypting stored DB passwords |
+| `DATABASE_URL` | Postgres connection string for Clairvoyance's own metadata |
+| `BETTER_AUTH_SECRET` | Random secret for session signing (≥ 32 chars) |
+| `CREDENTIAL_ENCRYPTION_KEY` | 64-char hex key used to encrypt saved database passwords (`openssl rand -hex 32`) |
 
-**`backend/.env`** (optional)
-
-| Variable | Description |
-|---|---|
-| `VOYAGE_API_KEY` | Enables semantic understanding cache + session search |
-| `BETTER_AUTH_GOOGLE_*` | Google OAuth credentials |
-| `BETTER_AUTH_GITHUB_*` | GitHub OAuth credentials |
-
----
-
-## Key Features
-
-### 🔐 Authentication & Sessions
-- Sign up / sign in with email+password, Google, or GitHub (via Better Auth)
-- Every session is persisted in Postgres — resume from any device
-- Share any session as a public read-only link (`/share/<token>`)
-- Rename sessions and add tags inline from the chat view
-
-### 🗄️ Direct Database Connectors
-- Connect PostgreSQL or MySQL databases directly — no CSV needed
-- Credentials encrypted with AES-256-GCM; plaintext never stored
-- Same SQL guardrails apply to live databases
-- Connection pool per external DB (max 5 connections, idle timeout)
-
-### ⚡ Understanding Cache (two-layer)
-- **Exact hit**: SHA-256 of file content → instant cache lookup in Postgres
-- **Semantic hit** *(requires `VOYAGE_API_KEY`)*: cosine similarity over schema embeddings — same schema with a different filename still hits the cache (threshold: 0.92)
-- Cache misses run the full `dataAnalyst` agent and store the result for future hits
-
-### 🔍 Semantic Session Search *(requires `VOYAGE_API_KEY`)*
-- Both user questions and assistant responses are embedded on save
-- `GET /sessions/search?q=` runs a pgvector cosine similarity query over all your messages
-- Dashboard search bar is debounced (400 ms) and falls back to name-filter if the API key isn't set
-
-### 🔒 SQL Guardrails
-- Only `SELECT` queries reach any database — enforced by AST parsing
-- Works across SQLite, PostgreSQL, and MySQL dialects
-- Column references validated against real schema — no hallucinated columns
-- All queries capped at 10,000 rows
-
-### 📡 Real-time Streaming
-- Agent steps stream to the frontend via SSE as they happen
-- You see: schema read → SQL written → query run → visualization chosen
-
-### 📊 Smart Visualization
-
-Results automatically render as **multiple complementary charts** when the data supports it. The backend picks only relevant types — no noise.
-
-| Data shape | Charts shown |
-|---|---|
-| Scalar (1×1) | Inline number — no chart |
-| < 2 rows | Text only |
-| Time + numeric (trend/cumulative) | Area + Line + Bar |
-| Time + numeric (other) | Line + Area + Bar |
-| 2 numeric columns | Scatter only |
-| Categorical + numeric (> 8 rows) | Bar only |
-| Categorical + numeric (≤ 8 rows) | Bar + Pie |
-| 2 text cols + numeric (low cardinality) | Heatmap + Bar |
-
-Charts render in a **2-column compact grid** with labelled headers (📊 Bar, 📈 Line, …). Each has its own ⬇ PNG export button.
-
-### 🔄 Multi-Turn Chart Refinement
-
-After a chart appears you can change how it looks — no re-running the query.
-
-- **Switcher pills** — `bar | line | area | pie | scatter | heatmap` buttons appear below every chart; click to switch instantly (pure client-side, zero network round-trip)
-- **Natural language** — type "make it a pie chart", "show as area", "switch to bar" — the app intercepts the message client-side and re-renders immediately
-- **Multi-view panels** — click "Add view" to pin a second chart of the same data in a different type side-by-side; remove any extra view independently
-
-### 📤 Export
-
-- **⬇ PNG** — captures the chart div with `html2canvas` (2× resolution, white background) and triggers a download
-- **⬇ CSV** — converts `data[]` to RFC-4180 CSV (values with commas/quotes properly escaped) and triggers a download
-- Both buttons appear in the chart toolbar alongside the type switcher; filename defaults to the chart title
-
----
-
-## Project Structure
-
-```
-clairvoyance/
-├── docker-compose.yml            Postgres 16 + pgvector (port 5433)
-├── backend/
-│   ├── drizzle/                  Auto-generated SQL migrations
-│   ├── drizzle.config.ts
-│   └── src/
-│       ├── index.ts              Hono app — mounts all routers, CORS, auth middleware
-│       ├── types.ts              AppEnv (typed Hono context)
-│       ├── routes/
-│       │   ├── upload.ts         POST /upload (CSV → SQLite + app_sessions row)
-│       │   ├── query.ts          POST /query/stream (SSE, persists messages)
-│       │   ├── schema.ts         GET  /schema/:sessionId
-│       │   ├── sessions.ts       CRUD /sessions + share tokens + /sessions/search
-│       │   └── connections.ts    CRUD /connections (live DB connectors)
-│       ├── middleware/
-│       │   └── auth.ts           Better Auth session verification
-│       ├── agents/
-│       │   ├── orchestrator.ts   Anthropic tool-use loop (routes to SQLite or live DB)
-│       │   ├── dataAnalyst.ts    Upload-time data understanding
-│       │   ├── guardrails.ts     SQL AST validation (SQLite / PostgreSQL / MySQL)
-│       │   └── vizSelector.ts    Chart type selection
-│       ├── db/
-│       │   ├── pgClient.ts       Drizzle + pg pool
-│       │   ├── schema.ts         All Drizzle table definitions
-│       │   ├── manager.ts        Per-session SQLite registry
-│       │   ├── schemaReader.ts   SQLite schema extraction
-│       │   ├── understandingCache.ts  Two-layer cache (exact hash + pgvector similarity)
-│       │   ├── tableEmbeddings.ts     Per-table schema embeddings (semantic table selection)
-│       │   └── connectors/
-│       │       ├── index.ts      ConnectorInterface + pool registry
-│       │       ├── pgConnector.ts
-│       │       └── mysqlConnector.ts
-│       └── lib/
-│           ├── auth.ts           Better Auth instance
-│           ├── crypto.ts         AES-256-GCM for credential encryption
-│           └── embeddings.ts     Voyage AI voyage-3-lite wrapper
-└── frontend/
-    └── app/
-        ├── layout.tsx            Root layout — wraps with SessionGuard
-        ├── page.tsx              Main chat (session resume, share modal, title edit)
-        ├── dashboard/page.tsx    Sessions list + semantic search bar
-        ├── share/[token]/page.tsx  Public read-only session view
-        ├── (auth)/
-        │   ├── sign-in/page.tsx
-        │   └── sign-up/page.tsx
-        ├── lib/
-        │   ├── api.ts            All typed API + SSE client functions
-        │   ├── authClient.ts     Better Auth React client
-        │   └── formatDate.ts     Human-readable date formatting utility
-        ├── components/
-        │   ├── SessionGuard.tsx  Auth redirect guard
-        │   ├── DataUpload/       CSV drag-drop + Connect Database form
-        │   ├── DataInsights/     Domain, summary, suggested questions
-        │   ├── Chat/             Streaming chat + live step timeline + loading tracker
-        │   ├── Charts/           Recharts renderers
-        │   └── SchemaViewer/     Table/column browser
-        └── ...
-```
-
----
-
-## Architecture
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed diagrams of every subsystem.
-
----
-
-## Large Schema Support
-
-Clairvoyance is designed to work well with real-world databases that have hundreds of tables. Two separate problems require two separate strategies.
-
-### UI behaviour by schema size
-
-| Tables | Insights panel | "Ideas to Explore" panel | Analysis |
-|---|---|---|---|
-| < 50 | ✅ Insights + Schema tabs | ✅ Shown | Full analysis runs automatically |
-| ≥ 50 | ❌ Hidden (Schema tab only) | ❌ Not rendered | Skipped — no tokens spent |
-
-When a database with ≥ 50 tables is connected, the frontend immediately shows the Schema browser. A clear message explains why insights are not available. The chat panel takes the full remaining width.
-
-This threshold is controlled by `LARGE_SCHEMA_THRESHOLD = 50` in `frontend/app/page.tsx`.
-
----
-
-### Problem 1 — AI Insights with 30–49 tables
-
-For databases in the 30–49 table range, Clairvoyance uses a **two-pass clustered analysis** rather than dumping everything into one prompt:
-
-```
-Pass 1 — Catalogue (cheap)
-  Send: table_name | row_count for all tables
-  Ask:  "Group these into domain clusters"
-  Get:  { clusters: [{ name: "billing", tables: ["invoices", "payments", ...] }, ...] }
-
-Pass 2 — Deep dive per cluster (parallel, max 8 clusters)
-  For each cluster: pick top 3 tables by column count
-  Send: full schema + 3 sample rows for those tables
-  Get:  a DataUnderstanding per cluster
-
-Synthesis
-  Merge all cluster results → one DataUnderstanding
-  · domain: from the most prominent cluster
-  · keyFeatures: top 5 per cluster, sorted by importance
-  · suggestedQuestions: 2 per cluster (max 8 total)
-  · primaryMetrics: union across all clusters
-```
-
-**Fallback**: if clustering fails, the top 25 tables by row count are analysed directly.
-
-For databases ≤ 30 tables, the standard single-pass analysis runs (no change).
-
----
-
-### Problem 2 — Query context with large schemas
-
-Even below the 50-table UI threshold, putting all schemas in **every query's system prompt** is expensive. Clairvoyance uses **contextual schema injection**:
-
-```
-At session start:
-  Build a keyword index:  word → {table names, column names that contain it}
-
-At query time:
-  1. Tokenise the question + last 3 conversation turns
-  2. Score each table by how many tokens overlap with its name + column names
-  3. Inject full schema for the top ~20 scoring tables
-  4. Always prepend a compact one-liner index of ALL table names so the AI
-     knows what exists even if the full schema wasn't included
-
-System prompt structure:
-  ## Schema Index (N tables)
-  auth_users, auth_sessions, orders, order_items, products, ...
-
-  ## Relevant Schema (20 tables for this query)
-  Table: orders [45,231 rows]
-    Columns: id (INTEGER), customer_id (INTEGER), total (REAL), ...
-    Sample rows: { "id": 1, "customer_id": 42, "total": 129.99 }
-  ...
-```
-
-If the AI needs a table that wasn't included, it calls a `lookup_schema` tool:
-
-```
-Tool: lookup_schema({ table_name: "shipment_events" })
-→ Returns full column definitions for that table on demand
-→ That table's columns are added to the allowed-column guardrail for the query
-```
-
-This means:
-- **Small schemas (≤ 30 tables)**: full schema in prompt, no change
-- **Medium schemas (30–49 tables)**: contextual injection + two-pass insights
-- **Large schemas (50+ tables)**: contextual injection for queries; insights + suggestions panels hidden in UI
-
----
-
-### Problem 3 — Result rows sent to the AI
-
-SQL can return thousands of rows but the AI only needs a sample to write a good summary. Clairvoyance enforces a strict split:
-
-| Destination | Row limit |
-|---|---|
-| Database → user (frontend table/CSV) | Up to `MAX_ROWS` (default: 10,000) |
-| Database → AI reasoning | Up to `DATA_ROWS_TO_MODEL` (default: 50) |
-
-The model receives: `{ rowCount: 9500, preview: [...50 rows...], note: "9450 more rows available to the user" }`
-
-This keeps mid-conversation context small regardless of result set size.
-
-**`backend/.env` knobs:**
+**Optional**
 
 | Variable | Default | Description |
 |---|---|---|
-| `MAX_ROWS` | `10000` | Hard cap on rows returned to the user |
-| `DATA_ROWS_TO_MODEL` | `50` | Rows included in the tool result for AI reasoning |
-| `MAX_SCHEMA_TABLES_PER_QUERY` | `20` | Tables included in a single query's system prompt |
-| `SCHEMA_CLUSTER_PASSES` | `8` | Max clusters in two-pass insight analysis |
+| `VOYAGE_API_KEY` | — | Semantic (pgvector) table search for large databases, and search over past questions on the dashboard |
+| `CLAIRVOYANCE_MODEL` | `claude-opus-5-5` | Claude model used for analysis and answers |
+| `ANTHROPIC_REFUSAL_FALLBACK` | on | Server-side refusal fallback on supported models; set `off` if your API gateway rejects it |
+| `PORT` | `3001` | Backend port |
+| `BETTER_AUTH_URL` / `BETTER_AUTH_TRUSTED_ORIGIN` / `FRONTEND_ORIGIN` | localhost | URLs for auth callbacks, share links and CORS |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Google sign-in |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | GitHub sign-in |
+| `MAX_ROWS` | `10000` | Max rows any query may return |
+| `MAX_CLIENT_ROWS` | `1000` | Rows sent to the browser and stored with each answer |
+| `DATA_ROWS_TO_MODEL` | `40` | Preview rows the AI sees (it also gets exact statistics over all rows) |
+| `QUERY_TIMEOUT_MS` | `30000` | Per-statement timeout on live databases |
+| `SCHEMA_CACHE_TTL_MS` | `600000` | How long a live database's table list is cached |
+| `FULL_SCHEMA_TABLE_LIMIT` | `25` | Above this many tables (or 600 columns) only the relevant tables go into each prompt |
+
+---
+
+## Key features
+
+### Answers written for business readers
+The agent finishes every question with a structured `present_answer` call: headline, takeaways, method, follow-ups, a suggested visual and a friendly label + format (currency, percent, date…) for every column. The prompt forbids database jargon in anything the reader sees. Relationship questions get a plain-language strength statement ("a strong positive relationship, correlation 0.78") computed from the data — not guessed — plus a reminder that correlation isn't causation.
+
+### Charts that fit the question (or no chart)
+The AI proposes a visual; `backend/src/agents/visual.ts` checks it against the actual result (columns exist, measures are numeric, a pie has ≤ 8 non-negative parts…) and falls back to a value-based heuristic if it doesn't fit. Column types come from the values, not the names, so `day_count` is a number and `2024-03` is a month.
+
+| Result shape | Default visual |
+|---|---|
+| One row of numbers | Headline-number tiles (up to 4) |
+| Time + measure(s) | Line (area for cumulative questions); measures with different units become stacked small charts, never a dual axis |
+| Time + category + measure | One line per category (top 7 + "Other") |
+| Category + measure | Bars — horizontal when labels are long or there are many; top 15 shown, all in the table |
+| Two categories + measure | Grouped bars |
+| A few parts of a whole ("share", "breakdown") | Donut with percentages (≤ 6 slices + "Other") |
+| Two measures | Scatter with trend line and correlation |
+| Lists of records / text only | Table |
+
+Every visual has a Table view, CSV download and image export. The categorical palette is checked for colour-vision deficiency.
+
+### Big databases
+- **Schema cache** per connection (the old code re-read the whole catalogue on every question).
+- **Relationships**: real foreign keys are read from Postgres/MySQL, and obvious ones (`customer_id` → `customers.id`) are inferred when a database has none — so the AI knows how to join.
+- **Finding the right tables**: semantic search over per-table embeddings in **pgvector** (with `VOYAGE_API_KEY`) merged with keyword search (stemmed, prefix-aware), then expanded with the tables those join to. A `find_tables` tool lets the AI look further. A compact index of every table name stays in the (prompt-cached) system prompt.
+- **Overview for any size**: databases with more than 30 tables are grouped into business areas, a few representative tables per area are studied (with sample rows), and the notes are merged into one summary.
+- Tested against Postgres catalogues with schema-qualified and mixed-case (`"AdCampaigns"`) tables.
+
+*Is a dedicated vector database needed?* No. The vector workload here is per-session table search and message search — thousands of vectors, not billions — which pgvector inside the existing Postgres handles with exact search in milliseconds, with no extra service to run.
+
+### Safety
+- Only single `SELECT` statements pass the AST guardrail; column names are checked against the real schema.
+- Live-database queries run inside **read-only transactions** with a statement timeout, so even a guardrail miss can't write.
+- Saved passwords are AES-256-GCM encrypted; sessions are only reachable by their owner.
+
+### Sessions, sharing and search
+- Every analysis is saved; the dashboard shows each one's topic, summary and question count.
+- Share a read-only link (`/share/<token>`) and turn it off any time.
+- Dashboard search filters by name/topic instantly and, with `VOYAGE_API_KEY`, also searches past questions semantically.
+
+---
+
+## Project structure
+
+```
+clairvoyance/
+├── docker-compose.yml               Postgres 16 + pgvector (port 5433)
+├── backend/
+│   ├── drizzle/                     SQL migrations (+ meta/_journal.json)
+│   └── src/
+│       ├── index.ts                 Hono app — routers, CORS, auth, public share route
+│       ├── routes/
+│       │   ├── upload.ts            POST /upload — CSV → SQLite, background analysis
+│       │   ├── query.ts             POST /query/stream — SSE answer stream, persists messages
+│       │   ├── sessions.ts          /sessions CRUD, /connect, /:id/tables, /:id/analyze, share, search
+│       │   └── connections.ts       /connections — test, save (encrypted), preview, delete
+│       ├── agents/
+│       │   ├── orchestrator.ts      Question-answering agent (find → explore → query → present)
+│       │   ├── visual.ts            Result profiling, labels/formats, stats, visual validation
+│       │   ├── dataAnalyst.ts       Plain-language overview (single pass or by business area)
+│       │   └── guardrails.ts        SQL AST validation
+│       ├── db/
+│       │   ├── dataSource.ts        Session → SQLite or live connector + schema
+│       │   ├── analysisJobs.ts      De-duplicated background analysis per session
+│       │   ├── schemaIndex.ts       Keyword search, inferred relationships, related tables
+│       │   ├── tableEmbeddings.ts   pgvector table embeddings (semantic table search)
+│       │   ├── understandingCache.ts Exact-match cache of overviews
+│       │   ├── schemaReader.ts      SQLite schema + prompt formatting
+│       │   ├── manager.ts           Per-session SQLite files
+│       │   ├── schema.ts / pgClient.ts  Drizzle tables + pool
+│       │   └── connectors/          Postgres & MySQL (schema cache, FKs, read-only queries)
+│       └── lib/                     llm.ts (Claude), embeddings.ts, crypto.ts, auth.ts
+└── frontend/app/
+    ├── page.tsx                     New analysis: upload or connect
+    ├── dashboard/page.tsx           My analyses
+    ├── session/[id]/page.tsx        Conversation with your data
+    ├── share/[token]/page.tsx       Read-only shared view
+    ├── (auth)/                      Sign in / sign up
+    ├── lib/                         api.ts (types + SSE client), format.ts (numbers/dates), authClient.ts
+    └── components/
+        ├── Answer/                  AnswerCard + Visual (charts, KPI tiles, table)
+        ├── Chat/                    Conversation, progress, composer
+        ├── DataPanel/               "About this data" drawer
+        ├── DataUpload/              File drop + database connect
+        ├── Auth/, AppHeader.tsx, SessionGuard.tsx, ui.tsx
+```
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for how each part works.
 
 ---
 
 ## Roadmap
 
-- [ ] Pinned dashboard of saved questions
+- [ ] Excel (.xlsx) upload without exporting to CSV first
+- [ ] Pin answers to a dashboard and refresh them
 - [ ] BigQuery / Snowflake connectors
 - [ ] Session expiry + storage cleanup job

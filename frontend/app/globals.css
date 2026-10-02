@@ -1,103 +1,97 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* ── Terra Design System ───────────────────────────────────────────────────── */
+/* ── Terra design tokens ─────────────────────────────────────────────────────
+   Warm, calm, readable. Components use these semantic names via Tailwind
+   (bg-canvas, text-ink-2, border-line, bg-brand …) — no raw hex in components. */
 @theme inline {
-  /* Fonts */
-  --font-headline: var(--font-literata), serif;
-  --font-body: var(--font-nunito-sans), sans-serif;
-  --font-sans: var(--font-nunito-sans), sans-serif;
-  --font-mono: var(--font-geist-mono);
+  --font-headline: var(--font-literata), Georgia, serif;
+  --font-sans: var(--font-nunito-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  /* Terra color palette */
-  --color-primary:                  #4a7c59;
-  --color-on-primary:               #ffffff;
-  --color-primary-container:        #78a886;
-  --color-on-primary-container:     #d8f0de;
-  --color-primary-fixed:            #c8e8d0;
-  --color-primary-fixed-dim:        #8ecf9e;
-  --color-on-primary-fixed:         #002110;
-  --color-on-primary-fixed-variant: #2a6038;
-  --color-inverse-primary:          #8ecf9e;
+  --color-canvas: #f7f3ec;        /* page background */
+  --color-surface: #ffffff;       /* cards */
+  --color-surface-2: #fbf8f3;     /* subtle panels inside cards */
+  --color-sunken: #f1ece3;        /* inputs, chips, hover fills */
+  --color-line: #e7e0d4;          /* borders */
+  --color-line-strong: #d6cdbd;
 
-  --color-secondary:                #6b6358;
-  --color-on-secondary:             #ffffff;
-  --color-secondary-container:      #f0e8db;
-  --color-on-secondary-container:   #5e5548;
-  --color-secondary-fixed:          #f0e8db;
-  --color-secondary-fixed-dim:      #d4ccbf;
-  --color-on-secondary-fixed:       #1e1a13;
-  --color-on-secondary-fixed-variant: #4a4538;
+  --color-ink: #1f2421;           /* primary text */
+  --color-ink-2: #4b524c;         /* secondary text */
+  --color-ink-3: #7b8279;         /* muted text, captions */
 
-  --color-tertiary:                 #705c30;
-  --color-on-tertiary:              #ffffff;
-  --color-tertiary-container:       #c4a66a;
-  --color-on-tertiary-container:    #554020;
-  --color-tertiary-fixed:           #f8e0a8;
-  --color-tertiary-fixed-dim:       #dcc48e;
-  --color-on-tertiary-fixed:        #221a05;
-  --color-on-tertiary-fixed-variant: #554020;
+  --color-brand: #2e7a52;         /* actions, focus */
+  --color-brand-strong: #235f40;
+  --color-brand-soft: #e6f0e9;
+  --color-accent: #8a6a2f;        /* small highlights */
+  --color-accent-soft: #f6eedd;
 
-  --color-background:               #faf6f0;
-  --color-on-background:            #2e3230;
+  --color-danger: #b4372f;
+  --color-danger-soft: #fbe9e7;
 
-  --color-surface:                  #faf6f0;
-  --color-on-surface:               #2e3230;
-  --color-surface-bright:           #faf6f0;
-  --color-surface-dim:              #dbd7cf;
-  --color-surface-variant:          #e4e0d8;
-  --color-on-surface-variant:       #4a4e4a;
-  --color-surface-tint:             #4a7c59;
+  /* Chart tokens (categorical order validated for colour-vision deficiency) */
+  --color-grid: #ece6db;
+  --color-series-1: #2e8a57;
+  --color-series-2: #2f6fc0;
+  --color-series-3: #e0662f;
+  --color-series-4: #13998f;
+  --color-series-5: #6a4fb3;
+  --color-series-6: #d24b3e;
+  --color-series-7: #d49a00;
+  --color-series-8: #c4508a;
 
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-container-low:    #f5f1ea;
-  --color-surface-container:        #f0ece4;
-  --color-surface-container-high:   #eae6de;
-  --color-surface-container-highest: #e4e0d8;
-
-  --color-inverse-surface:          #2e3230;
-  --color-inverse-on-surface:       #f5f0e8;
-
-  --color-outline:                  #74796e;
-  --color-outline-variant:          #c4c8bc;
-
-  --color-error:                    #b83230;
-  --color-on-error:                 #ffffff;
-  --color-error-container:          #ffdad8;
-  --color-on-error-container:       #690005;
-
-  /* Radius */
-  --radius-DEFAULT: 0.5rem;
-  --radius-lg:      1rem;
-  --radius-xl:      1.5rem;
-  --radius-full:    9999px;
+  --shadow-card: 0 1px 2px rgba(31, 36, 33, 0.04), 0 4px 16px rgba(31, 36, 33, 0.04);
+  --shadow-pop: 0 8px 32px rgba(31, 36, 33, 0.12);
 }
 
-body {
-  font-family: var(--font-body);
-  background-color: #faf6f0;
-  color: #2e3230;
-}
+/* In a layer so Tailwind utilities (e.g. font-sans on a heading) can override them. */
+@layer base {
+  html, body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
 
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-headline);
+  h1, h2, h3 {
+    font-family: var(--font-headline);
+  }
+
+  ::selection {
+    background: var(--color-brand-soft);
+  }
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background-color: #c4c8bc;
-  border-radius: 20px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background-color: #74796e;
-}
+::-webkit-scrollbar-thumb { background-color: var(--color-line-strong); border-radius: 20px; border: 2px solid transparent; background-clip: content-box; }
 
-@keyframes slide-in-up {
+@keyframes rise {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-slide-in {
-  animation: slide-in-up 0.18s ease-out both;
+.animate-rise { animation: rise 0.22s ease-out both; }
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
 }
+.skeleton {
+  background: linear-gradient(90deg, var(--color-sunken) 0px, #f8f4ee 120px, var(--color-sunken) 240px);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 8px;
+}
+
+@keyframes drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+.animate-drawer { animation: drawer-in 0.2s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise, .animate-drawer, .skeleton { animation: none; }
+}
+
+/* Keep Recharts focus outlines from drawing boxes around SVGs */
+.recharts-wrapper svg:focus, .recharts-surface:focus { outline: none; }
