@@ -7,11 +7,11 @@ import type {
 /**
  * Single place that knows how Clairvoyance talks to Claude.
  *
- * - The model is configurable with CLAIRVOYANCE_MODEL (default: claude-opus-5-5).
+ * - The model is configurable with CLAIRVOYANCE_MODEL (default: claude-sonnet-5-5).
  * - Server-side refusal fallbacks are on by default for models that support them;
  *   set ANTHROPIC_REFUSAL_FALLBACK=off to disable (e.g. on Bedrock/Vertex proxies).
  */
-export const MODEL = process.env.CLAIRVOYANCE_MODEL ?? "claude-opus-5-5";
+export const MODEL = process.env.CLAIRVOYANCE_MODEL ?? "claude-sonnet-5-5";
 
 const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"]);
 const useFallbacks = process.env.ANTHROPIC_REFUSAL_FALLBACK !== "off" && FALLBACK_MODELS.has(MODEL);

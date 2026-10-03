@@ -49,7 +49,7 @@ graph LR
 | Frontend | Next.js 16, React 19, Tailwind CSS 4, Recharts 3 |
 | Backend | Bun + Hono (TypeScript) |
 | Auth | Better Auth (email/password + optional Google/GitHub OAuth) |
-| AI | Anthropic Claude via `@anthropic-ai/sdk` — `claude-opus-5-5` by default (`CLAIRVOYANCE_MODEL`) |
+| AI | Anthropic Claude via `@anthropic-ai/sdk` — `claude-sonnet-5-5` by default (`CLAIRVOYANCE_MODEL`) |
 | Embeddings | Voyage AI `voyage-3-lite` (1024-dim, optional) |
 | Metadata DB | PostgreSQL 16 + **pgvector** + Drizzle ORM |
 | Uploaded data | SQLite via `bun:sqlite` (one file per analysis) |
@@ -124,7 +124,7 @@ cd frontend && bun run lint && bun run build
 | Variable | Default | Description |
 |---|---|---|
 | `VOYAGE_API_KEY` | — | Semantic (pgvector) table search for large databases, and search over past questions on the dashboard |
-| `CLAIRVOYANCE_MODEL` | `claude-opus-5-5` | Claude model used for analysis and answers |
+| `CLAIRVOYANCE_MODEL` | `claude-sonnet-5-5` | Claude model used for analysis and answers. `claude-opus-5-5` costs twice as much but may do better on very large or messy databases |
 | `ANTHROPIC_REFUSAL_FALLBACK` | on | Server-side refusal fallback on supported models; set `off` if your API gateway rejects it |
 | `PORT` | `3001` | Backend port |
 | `BETTER_AUTH_URL` / `BETTER_AUTH_TRUSTED_ORIGIN` / `FRONTEND_ORIGIN` | localhost | URLs for auth callbacks, share links and CORS |

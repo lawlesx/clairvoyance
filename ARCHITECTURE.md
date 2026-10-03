@@ -270,7 +270,7 @@ Migrations live in `backend/drizzle/` and are listed in `meta/_journal.json` (`0
 
 ## 9. Claude usage (`lib/llm.ts`)
 
-- One client, model from `CLAIRVOYANCE_MODEL` (default `claude-opus-5-5`).
+- One client, model from `CLAIRVOYANCE_MODEL` (default `claude-sonnet-5-5`; set `claude-opus-5-5` for harder databases).
 - Agent turns: `effort: "medium"`, `max_tokens: 16000`, cached system prompt, abortable.
 - Overviews: structured outputs with JSON schemas, `effort: "low"`.
 - Server-side refusal fallbacks (`fallbacks: "default"`) are enabled on models that support them; `ANTHROPIC_REFUSAL_FALLBACK=off` disables this for gateways that reject the parameter.
