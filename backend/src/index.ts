@@ -4,15 +4,34 @@ import { logger } from "hono/logger";
 import { eq } from "drizzle-orm";
 import { uploadRouter } from "./routes/upload";
 import { queryRouter } from "./routes/query";
-import { schemaRouter } from "./routes/schema";
 import { sessionsRouter } from "./routes/sessions";
 import { connectionsRouter } from "./routes/connections";
 import { auth } from "./lib/auth";
 import { authMiddleware } from "./middleware/auth";
-import { db as pgDb } from "./db/pgClient";
+import { db as pgDb, pool } from "./db/pgClient";
 import { appSessions, messages } from "./db/schema";
 
 const app = new Hono();
+
+/** Say clearly at startup if the metadata database is unreachable or not migrated. */
+async function checkDatabase() {
+  const where = (process.env.DATABASE_URL ?? "").replace(/\/\/([^:@/]+):[^@/]*@/, "//$1:***@");
+  try {
+    const { rows } = await pool.query<{ t: string | null }>(`SELECT to_regclass('public."user"')::text AS t`);
+    if (!rows[0]?.t) {
+      console.error(`\n⚠️  Connected to Postgres but Clairvoyance's tables don't exist yet.\n   Run: cd backend && bunx drizzle-kit migrate\n`);
+    }
+  } catch (e) {
+    const code = (e as { code?: string }).code ?? (e as Error).message;
+    console.error(
+      `\n⚠️  Can't reach Postgres at ${where} (${code}). Sign-in and everything else will fail until it's running.\n` +
+      `   • Using Docker: start Docker Desktop, then run \`docker compose up -d\` in the project root.\n` +
+      `   • Using your own Postgres: point DATABASE_URL in backend/.env at it (it needs the pgvector extension).\n` +
+      `   Then run: cd backend && bunx drizzle-kit migrate\n`
+    );
+  }
+}
+checkDatabase();
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:3000";
 
@@ -73,7 +92,6 @@ app.use("*", authMiddleware);
 
 app.route("/upload", uploadRouter);
 app.route("/query", queryRouter);
-app.route("/schema", schemaRouter);
 app.route("/sessions", sessionsRouter);
 app.route("/connections", connectionsRouter);
 
@@ -85,4 +103,5 @@ app.onError((err, c) => {
 const port = parseInt(process.env.PORT ?? "3001");
 console.log(`🚀 Clairvoyance backend running on http://localhost:${port}`);
 
-export default { port, idleTimeout: 120, fetch: app.fetch };
+// 255s is Bun's maximum; overview analysis of very large databases can take a while.
+export default { port, idleTimeout: 255, fetch: app.fetch };

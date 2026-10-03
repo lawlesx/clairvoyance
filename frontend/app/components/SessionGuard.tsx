@@ -34,8 +34,8 @@ export function SessionGuard({ children }: { children: React.ReactNode }) {
   // Show nothing while checking auth to avoid flash
   if (isPending) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#faf6f0" }}>
-        <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#4a7c59", borderTopColor: "transparent" }} />
+      <div className="flex min-h-screen items-center justify-center text-brand">
+        <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
       </div>
     );
   }

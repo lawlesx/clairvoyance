@@ -16,8 +16,10 @@ const FORBIDDEN_KEYWORDS = /\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|R
 export function validateSQL(sql: string, allowedColumns?: Set<string>, dialect: SqlDialect = "SQLite"): string {
   const trimmed = sql.trim().replace(/;+$/, "");
 
-  if (FORBIDDEN_KEYWORDS.test(trimmed)) {
-    const match = trimmed.match(FORBIDDEN_KEYWORDS)!;
+  // Ignore words inside string literals (e.g. WHERE action = 'delete').
+  const withoutStrings = trimmed.replace(/'(?:[^']|'')*'/g, "''");
+  if (FORBIDDEN_KEYWORDS.test(withoutStrings)) {
+    const match = withoutStrings.match(FORBIDDEN_KEYWORDS)!;
     throw new GuardrailError(`Forbidden SQL keyword: ${match[0].toUpperCase()}`);
   }
 

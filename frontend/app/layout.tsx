@@ -24,8 +24,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Clairvoyance — Data Intelligence Dashboard",
-  description: "Ask questions about your data in plain English.",
+  title: "Clairvoyance — Ask your data anything",
+  description: "Upload a spreadsheet or connect a database and ask questions in plain English. Clear answers and the right chart, no SQL needed.",
 };
 
 export default function RootLayout({
@@ -38,7 +38,7 @@ export default function RootLayout({
       lang="en"
       className={`${literata.variable} ${nunitoSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col" style={{ backgroundColor: "#faf6f0" }}>
+      <body className="min-h-full bg-canvas text-ink">
         <SessionGuard>{children}</SessionGuard>
       </body>
     </html>
