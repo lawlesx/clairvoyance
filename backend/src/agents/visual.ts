@@ -8,13 +8,15 @@
  * proposal against the real data and falls back to a heuristic when it doesn't fit.
  */
 
-export type VisualType = "kpi" | "bar" | "line" | "area" | "pie" | "scatter" | "table" | "none";
+export type VisualType =
+  | "kpi" | "bar" | "stacked_bar" | "line" | "area" | "pie" | "treemap" | "scatter"
+  | "histogram" | "heatmap" | "table" | "none";
 export type ValueFormat = "number" | "currency" | "percent" | "ratio" | "date" | "text";
 export type ColumnKind = "number" | "date" | "text";
 
 export interface Visual {
   type: VisualType;
-  /** Category / time / x-axis column */
+  /** Category / time / x-axis column (not used by histogram, which bins the y column) */
   x?: string;
   /** Measure column(s) */
   y?: string[];
@@ -288,15 +290,34 @@ export function suggestVisual(rows: Row[], cols: ColumnMeta[], question = ""): V
     return { type: "scatter", x: nums[0]!.key, y: [nums[1]!.key] };
   }
 
+  // One measure on its own: how are the values spread?
+  if (nums.length === 1 && texts.length === 0 && rows.length >= 10) {
+    return { type: "histogram", y: [nums[0]!.key] };
+  }
+
   if (texts.length) {
     const x = texts[0]!.key;
     const categories = distinctCount(rows, x);
     // Two categorical columns + one measure → grouped bars.
     if (texts.length >= 2 && nums.length === 1) {
       const series = texts[1]!.key;
-      if (distinctCount(rows, series) <= 6 && categories <= 20) {
-        return { type: "bar", x, y: [nums[0]!.key], series };
+      const seriesCount = distinctCount(rows, series);
+      if (seriesCount <= 6 && categories <= 20) {
+        const stack = PART_OF_WHOLE_RE.test(question) && rows.every((r) => (toNumber(r[nums[0]!.key]) ?? -1) >= 0);
+        return { type: stack ? "stacked_bar" : "bar", x, y: [nums[0]!.key], series };
       }
+      // Too many groups for bars → a grid coloured by value.
+      if (categories <= 25 && seriesCount <= 25 && categories >= 3 && seriesCount >= 3) {
+        return { type: "heatmap", x, y: [nums[0]!.key], series };
+      }
+    }
+    // Many parts of a whole → treemap (pie is capped at 6 slices).
+    if (
+      nums.length === 1 && categories === rows.length && rows.length >= 7 && rows.length <= 40 &&
+      PART_OF_WHOLE_RE.test(question) &&
+      rows.every((r) => (toNumber(r[nums[0]!.key]) ?? -1) >= 0)
+    ) {
+      return { type: "treemap", x, y: [nums[0]!.key] };
     }
     if (
       nums.length === 1 && categories === rows.length && rows.length <= 6 &&
@@ -319,7 +340,9 @@ export function suggestVisual(rows: Row[], cols: ColumnMeta[], question = ""): V
  */
 export function validateVisual(v: Partial<Visual> | undefined, rows: Row[], cols: ColumnMeta[]): Visual | null {
   if (!v?.type) return null;
-  const types: VisualType[] = ["kpi", "bar", "line", "area", "pie", "scatter", "table", "none"];
+  const types: VisualType[] = [
+    "kpi", "bar", "stacked_bar", "line", "area", "pie", "treemap", "scatter", "histogram", "heatmap", "table", "none",
+  ];
   if (!types.includes(v.type)) return null;
   if (v.type === "table" || v.type === "none") return { type: v.type, title: v.title };
   if (!rows.length) return null;
@@ -331,6 +354,7 @@ export function validateVisual(v: Partial<Visual> | undefined, rows: Row[], cols
   const yKeys = y.slice(0, v.type === "kpi" ? 4 : 5).map((c) => c.key);
 
   if (v.type === "kpi") return rows.length <= 3 ? { type: "kpi", y: yKeys, title: v.title } : null;
+  if (v.type === "histogram") return rows.length >= 8 ? { type: "histogram", y: [yKeys[0]!], title: v.title } : null;
 
   const x = resolve(v.x);
   if (!x || yKeys.includes(x.key)) return null;
@@ -351,7 +375,16 @@ export function validateVisual(v: Partial<Visual> | undefined, rows: Row[], cols
       if (rows.length < 2) return null;
       return { type: v.type, x: x.key, y: seriesKey ? [yKeys[0]!] : yKeys, series: seriesKey, title: v.title };
     case "bar":
-      return { type: "bar", x: x.key, y: seriesKey ? [yKeys[0]!] : yKeys, series: seriesKey, title: v.title };
+    case "stacked_bar":
+      return { type: v.type, x: x.key, y: seriesKey ? [yKeys[0]!] : yKeys, series: seriesKey, title: v.title };
+    case "treemap": {
+      if (rows.length < 3 || rows.length > 60 || seriesKey) return null;
+      const allPositive = rows.every((r) => (toNumber(r[yKeys[0]!]) ?? -1) >= 0);
+      return allPositive ? { type: "treemap", x: x.key, y: [yKeys[0]!], title: v.title } : null;
+    }
+    case "heatmap":
+      if (!seriesKey || x.kind === "date" || rows.length < 4) return null;
+      return { type: "heatmap", x: x.key, y: [yKeys[0]!], series: seriesKey, title: v.title };
     default:
       return null;
   }

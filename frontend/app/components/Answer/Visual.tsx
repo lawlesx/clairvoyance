@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, ScatterChart, Scatter,
+  BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, ScatterChart, Scatter, Treemap,
   XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import type { ColumnMeta, Row, Visual } from "../../lib/api";
@@ -206,7 +206,7 @@ function LineOrArea({ ctx, visual, area, height = 300 }: { ctx: Ctx; visual: Vis
   );
 }
 
-function Bars({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
+function Bars({ ctx, visual, stacked = false }: { ctx: Ctx; visual: Visual; stacked?: boolean }) {
   const x = visual.x!;
   const fmt = TimeOrCategoryAxisFormatter(ctx, x);
   const yCols = (visual.y ?? []).map((k) => ctx.col(k)).filter((c): c is ColumnMeta => !!c);
@@ -228,7 +228,7 @@ function Bars({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
         {yCols.map((c) => (
           <div key={c.key}>
             <p className="mb-1 text-[13px] font-semibold text-ink-2">{c.label}</p>
-            <Bars ctx={ctx} visual={{ ...visual, y: [c.key] }} />
+            <Bars ctx={ctx} visual={{ ...visual, y: [c.key] }} stacked={stacked} />
           </div>
         ))}
       </div>
@@ -271,7 +271,8 @@ function Bars({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
               }} interval={0} />
             {tooltip}
             {keys.map((k, i) => (
-              <Bar key={k} dataKey={k} fill={seriesColor(i, k)} radius={[0, 4, 4, 0]} maxBarSize={24} isAnimationActive={false} />
+              <Bar key={k} dataKey={k} fill={seriesColor(i, k)} radius={stacked ? 0 : [0, 4, 4, 0]} maxBarSize={24}
+                stackId={stacked ? "s" : undefined} isAnimationActive={false} />
             ))}
           </BarChart>
         ) : (
@@ -282,7 +283,8 @@ function Bars({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
               tickFormatter={(v) => formatValue(v, valueCol, { compact: true })} />
             {tooltip}
             {keys.map((k, i) => (
-              <Bar key={k} dataKey={k} fill={seriesColor(i, k)} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false} />
+              <Bar key={k} dataKey={k} fill={seriesColor(i, k)} radius={stacked ? 0 : [4, 4, 0, 0]} maxBarSize={24}
+                stackId={stacked ? "s" : undefined} isAnimationActive={false} />
             ))}
           </BarChart>
         )}
@@ -333,6 +335,170 @@ function Donut({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function Histogram({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
+  const y = visual.y![0]!;
+  const yc = ctx.col(y);
+  const bins = useMemo(() => {
+    const vals = ctx.rows.map((r) => toNumber(r[y])).filter((n): n is number => n !== null);
+    if (!vals.length) return [];
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    if (lo === hi) return [{ label: formatValue(lo, yc, { compact: true }), count: vals.length, from: lo, to: hi }];
+    const n = Math.max(5, Math.min(20, Math.ceil(Math.sqrt(vals.length))));
+    const step = (hi - lo) / n;
+    const out = Array.from({ length: n }, (_, i) => ({
+      from: lo + i * step, to: lo + (i + 1) * step, count: 0,
+      label: formatValue(lo + i * step, yc, { compact: true }),
+    }));
+    for (const v of vals) out[Math.min(n - 1, Math.floor((v - lo) / step))]!.count++;
+    return out;
+  }, [ctx.rows, y, yc]);
+
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <BarChart data={bins} margin={{ top: 8, right: 12, bottom: 4, left: 4 }} barCategoryGap={2}>
+        <CartesianGrid vertical={false} stroke={GRID} />
+        <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={{ stroke: GRID }} interval="preserveStartEnd" minTickGap={16} />
+        <YAxis tick={axisTick} tickLine={false} axisLine={false} width={48} allowDecimals={false}
+          label={{ value: "Records", angle: -90, position: "insideLeft", fontSize: 12, fill: AXIS_TEXT, style: { textAnchor: "middle" } }} />
+        <Tooltip
+          cursor={{ fill: "rgba(31,36,33,0.04)" }}
+          content={(p) => {
+            const props = p as unknown as { active?: boolean; payload?: TipItem[] };
+            const b = props.payload?.[0]?.payload as unknown as { from: number; to: number; count: number } | undefined;
+            if (!props.active || !b) return null;
+            return (
+              <div className="rounded-xl border border-line bg-surface px-3 py-2 text-[13px] shadow-[var(--shadow-pop)]">
+                <p className="mb-1 font-semibold text-ink">{formatValue(b.from, yc)} – {formatValue(b.to, yc)}</p>
+                <p className="text-ink-2">Records: <span className="font-semibold text-ink">{b.count.toLocaleString()}</span></p>
+              </div>
+            );
+          }}
+        />
+        <Bar dataKey="count" fill={SERIES_COLORS[0]} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+interface TreeNode { name: string; size: number; fill: string; share: number; valueLabel: string; [k: string]: unknown }
+
+function TreemapChart({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
+  const x = visual.x!, y = visual.y![0]!;
+  const xc = ctx.col(x), yc = ctx.col(y);
+  const nodes = useMemo<TreeNode[]>(() => {
+    const sorted = [...ctx.rows].sort((a, b) => (toNumber(b[y]) ?? 0) - (toNumber(a[y]) ?? 0)).slice(0, 40);
+    const total = sorted.reduce((s, r) => s + (toNumber(r[y]) ?? 0), 0) || 1;
+    return sorted
+      .filter((r) => (toNumber(r[y]) ?? 0) > 0)
+      .map((r, i) => ({
+        name: formatValue(r[x], xc), size: toNumber(r[y]) ?? 0, fill: SERIES_COLORS[i % SERIES_COLORS.length]!,
+        share: (toNumber(r[y]) ?? 0) / total, valueLabel: formatValue(r[y], yc, { compact: true }),
+      }));
+  }, [ctx.rows, x, y, xc, yc]);
+
+  return (
+    <ResponsiveContainer width="100%" height={320}>
+      <Treemap data={nodes} dataKey="size" nameKey="name" stroke="#fff" isAnimationActive={false}
+        content={((p: { x: number; y: number; width: number; height: number; name?: string; fill?: string; share?: number; valueLabel?: string; depth?: number }) => {
+          if (p.depth === 0 || !p.name) return <g />;
+          const roomy = p.width > 70 && p.height > 38;
+          return (
+            <g>
+              <rect x={p.x} y={p.y} width={p.width} height={p.height} fill={p.fill} stroke="#fff" strokeWidth={2} rx={4} />
+              {roomy && (
+                <>
+                  <text x={p.x + 8} y={p.y + 20} fill="#fff" fontSize={12} fontWeight={600}>
+                    {p.name.length > p.width / 7 ? `${p.name.slice(0, Math.max(3, Math.floor(p.width / 7) - 1))}…` : p.name}
+                  </text>
+                  <text x={p.x + 8} y={p.y + 36} fill="#fff" fontSize={11} fillOpacity={0.9}>
+                    {Math.round((p.share ?? 0) * 100)}% · {p.valueLabel}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        }) as never}
+      >
+        <Tooltip content={(p) => {
+          const props = p as unknown as { active?: boolean; payload?: TipItem[] };
+          const n = props.payload?.[0]?.payload as unknown as TreeNode | undefined;
+          if (!props.active || !n) return null;
+          return (
+            <div className="rounded-xl border border-line bg-surface px-3 py-2 text-[13px] shadow-[var(--shadow-pop)]">
+              <p className="mb-1 font-semibold text-ink">{n.name}</p>
+              <p className="text-ink-2">{yc?.label}: <span className="font-semibold text-ink">{formatValue(n.size, yc)}</span> · {Math.round(n.share * 100)}%</p>
+            </div>
+          );
+        }} />
+      </Treemap>
+    </ResponsiveContainer>
+  );
+}
+
+function Heatmap({ ctx, visual }: { ctx: Ctx; visual: Visual }) {
+  const x = visual.x!, s = visual.series!, y = visual.y![0]!;
+  const xc = ctx.col(x), sc = ctx.col(s), yc = ctx.col(y);
+  const [hover, setHover] = useState<string | null>(null);
+
+  const grid = useMemo(() => {
+    const rank = (key: string) => {
+      const totals = new Map<string, number>();
+      for (const r of ctx.rows) totals.set(String(r[key] ?? "—"), (totals.get(String(r[key] ?? "—")) ?? 0) + Math.abs(toNumber(r[y]) ?? 0));
+      return [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k]) => k);
+    };
+    const rowKeys = rank(x), colKeys = rank(s);
+    const cells = new Map<string, number>();
+    for (const r of ctx.rows) {
+      const k = `${String(r[x] ?? "—")}\u0000${String(r[s] ?? "—")}`;
+      cells.set(k, (cells.get(k) ?? 0) + (toNumber(r[y]) ?? 0));
+    }
+    const vals = [...cells.values()];
+    return { rowKeys, colKeys, cells, lo: Math.min(...vals), hi: Math.max(...vals) };
+  }, [ctx.rows, x, s, y]);
+
+  const shade = (v: number) => {
+    const t = grid.hi === grid.lo ? 1 : (v - grid.lo) / (grid.hi - grid.lo);
+    return `rgba(46,138,87,${(0.08 + t * 0.85).toFixed(2)})`;
+  };
+
+  return (
+    <div>
+      <div className="overflow-auto">
+        <table className="border-separate border-spacing-0.5 text-[12px]">
+          <thead>
+            <tr>
+              <th className="px-2 py-1 text-left font-semibold text-ink-3">{xc?.label} / {sc?.label}</th>
+              {grid.colKeys.map((c) => (
+                <th key={c} className="max-w-[90px] truncate px-2 py-1 text-center font-medium text-ink-2" title={c}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {grid.rowKeys.map((rk) => (
+              <tr key={rk}>
+                <th className="max-w-[160px] truncate whitespace-nowrap px-2 py-1 text-left font-medium text-ink-2" title={rk}>{rk}</th>
+                {grid.colKeys.map((ck) => {
+                  const key = `${rk}\u0000${ck}`;
+                  const v = grid.cells.get(key);
+                  return (
+                    <td key={ck} onMouseEnter={() => setHover(key)} onMouseLeave={() => setHover(null)}
+                      title={v === undefined ? "No data" : `${rk} · ${ck}: ${formatValue(v, yc)}`}
+                      className="h-8 min-w-[44px] rounded px-1 text-center tabular-nums text-ink"
+                      style={{ backgroundColor: v === undefined ? "transparent" : shade(v), outline: hover === key ? "2px solid #1f2421" : undefined }}>
+                      {v === undefined ? "" : formatValue(v, yc, { compact: true })}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <NoteLine>Darker cells mean a higher {yc?.label.toLowerCase()}.</NoteLine>
     </div>
   );
 }
@@ -486,7 +652,11 @@ export function DataTable({ rows, cols, totalRows, truncated }: { rows: Row[]; c
 export function canChart(visual: Visual, rows: Row[]): boolean {
   if (!rows.length) return false;
   if (visual.type === "kpi") return !!visual.y?.length;
-  if (["bar", "line", "area", "pie", "scatter"].includes(visual.type)) return !!visual.x && !!visual.y?.length;
+  if (visual.type === "histogram") return !!visual.y?.length;
+  if (visual.type === "heatmap") return !!visual.x && !!visual.series && !!visual.y?.length;
+  if (["bar", "stacked_bar", "line", "area", "pie", "treemap", "scatter"].includes(visual.type)) {
+    return !!visual.x && !!visual.y?.length;
+  }
   return false;
 }
 
@@ -501,7 +671,11 @@ export default function VisualView({ visual, rows, cols }: { visual: Visual; row
     case "line": return <LineOrArea ctx={ctx} visual={visual} area={false} />;
     case "area": return <LineOrArea ctx={ctx} visual={visual} area />;
     case "bar": return <Bars ctx={ctx} visual={visual} />;
+    case "stacked_bar": return <Bars ctx={ctx} visual={visual} stacked />;
     case "pie": return <Donut ctx={ctx} visual={visual} />;
+    case "treemap": return <TreemapChart ctx={ctx} visual={visual} />;
+    case "histogram": return <Histogram ctx={ctx} visual={visual} />;
+    case "heatmap": return <Heatmap ctx={ctx} visual={visual} />;
     case "scatter": return <ScatterPlot ctx={ctx} visual={visual} />;
     default: return null;
   }

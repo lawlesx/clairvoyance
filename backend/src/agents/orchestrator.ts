@@ -57,7 +57,9 @@ type Emit = (event: StreamEvent) => Promise<void>;
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
-const VISUAL_TYPES = ["kpi", "line", "area", "bar", "pie", "scatter", "table", "none"];
+const VISUAL_TYPES = [
+  "kpi", "line", "area", "bar", "stacked_bar", "pie", "treemap", "scatter", "histogram", "heatmap", "table", "none",
+];
 const FORMATS = ["number", "currency", "percent", "ratio", "date", "text"];
 
 function buildTools(largeSchema: boolean): BetaTool[] {
@@ -199,7 +201,7 @@ function buildSystemPrompt(opts: {
 - headline: one sentence that answers the question directly, with the key number(s) nicely formatted ("$1.2M", "34%", "about 4,100 customers").
 - insights: up to 3 short bullets (≤ 25 words) that add something the headline doesn't: the biggest mover, an outlier, a caveat. Leave empty rather than pad.
 - Relationship questions: describe strength and direction in plain words using the correlation run_query reports, e.g. "a strong positive relationship (r = 0.78)". Mention that it doesn't prove cause and effect only when that matters.
-- visual: choose what helps most — kpi (1–4 headline numbers), line (trend), area (cumulative trend), bar (compare/rank groups), pie (share of a whole, ≤ 6 parts), scatter (two measures against each other), table (a list of records or details), none (the headline says it all). Don't force a chart.
+- visual: choose what helps most — kpi (1–4 headline numbers), line (trend), area (cumulative trend), bar (compare/rank groups; with `series` for grouped bars), stacked_bar (composition within each group, needs `series`), pie (share of a whole, ≤ 6 parts), treemap (share of a whole, 7+ parts), histogram (how one measure is distributed; set only `y`), heatmap (measure across two categories, set `x`, `series` and one `y`), scatter (two measures per record against each other — never use it for a category against a number; use bar or histogram), table (a list of records or details), none (the headline says it all). Don't force a chart.
 - columns: give every result column a friendly label and format (currency with ISO code when it's money).
 - method: one plain sentence on how it was worked out, including filters and assumptions ("Paid orders from Jan–Jun 2024, refunds excluded.").
 - follow_ups: 2–3 natural next questions the person might ask.
