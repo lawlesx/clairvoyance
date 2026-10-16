@@ -4,7 +4,8 @@ import fs from "fs";
 import type { TableSchema } from "./schemaReader";
 
 /** Uploaded files are stored as one SQLite database per session. */
-export const SESSIONS_DIR = path.join(import.meta.dir, "../../sessions");
+// Set SESSIONS_DIR to a persistent volume in production, or uploads vanish on redeploy.
+export const SESSIONS_DIR = process.env.SESSIONS_DIR ?? path.join(import.meta.dir, "../../sessions");
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
 interface SessionEntry {

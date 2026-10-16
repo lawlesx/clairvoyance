@@ -104,4 +104,5 @@ const port = parseInt(process.env.PORT ?? "3001");
 console.log(`🚀 Clairvoyance backend running on http://localhost:${port}`);
 
 // 255s is Bun's maximum; overview analysis of very large databases can take a while.
-export default { port, idleTimeout: 255, fetch: app.fetch };
+// HOST=:: listens on IPv4 and IPv6 — needed where services reach each other over an IPv6 private network.
+export default { port, hostname: process.env.HOST ?? "0.0.0.0", idleTimeout: 255, fetch: app.fetch };
