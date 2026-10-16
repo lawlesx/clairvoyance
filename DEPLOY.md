@@ -80,7 +80,13 @@ Railway redeploys the backend. Open the frontend URL, create an account, upload 
 
 ## Optional: Google / GitHub sign-in
 
-The backend supports `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`. Because the browser reaches the API through the `/backend` proxy, set `BETTER_AUTH_URL` to `https://<frontend-url>/backend` and register `https://<frontend-url>/backend/api/auth/callback/<google|github>` as the provider's callback URL. (Untested: email/password sign-in is the path this guide covers.)
+The sign-in page shows "Continue with Google" and "Continue with GitHub" buttons. Each provider only works once its variables are set on the **backend** service (a blank client ID leaves it disabled and the button shows an error). Because the browser reaches the API through the `/backend` proxy:
+
+- Set `BETTER_AUTH_URL` to `https://<frontend-url>/backend`.
+- **Google** (Cloud Console, APIs & Services, Credentials, OAuth client ID, Web application): authorized redirect URI `https://<frontend-url>/backend/api/auth/callback/google`; set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+- **GitHub** (Settings, Developer settings, OAuth Apps): authorization callback URL `https://<frontend-url>/backend/api/auth/callback/github`; set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+
+Locally, use `http://localhost:3001/api/auth/callback/<google|github>` with the default `BETTER_AUTH_URL`.
 
 ## Troubleshooting
 
