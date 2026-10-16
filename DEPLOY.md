@@ -9,7 +9,7 @@ Browser ──► frontend (Next.js, public URL) ──/backend/*──► backe
 
 Only the frontend is reachable from the internet. It forwards `/backend/*` to the API over Railway's private network, so the browser sees a single domain and login cookies work on Railway's free `*.up.railway.app` URLs (and in Safari, which blocks cross-site cookies).
 
-> **Cost.** Railway bills by usage (roughly $5–15/month for this app at low traffic, on the Hobby plan). Check Railway's current pricing, and set a **usage limit** under Settings → Usage so it can't surprise you. Anthropic API usage is billed separately by Anthropic — set a spend limit in the Anthropic console too.
+> **Cost.** Railway bills by usage (see [Railway's pricing](https://railway.com/pricing) for current rates). Set a **usage limit** under Settings → Usage so it can't surprise you. Anthropic API usage is billed separately by Anthropic — set a spend limit in the Anthropic console too.
 
 ## Before you start
 
@@ -18,7 +18,7 @@ Only the frontend is reachable from the internet. It forwards `/backend/*` to th
 - Generate two secrets on your computer:
   ```bash
   openssl rand -base64 32   # → BETTER_AUTH_SECRET
-  openssl rand -hex 32      # → CREDENTIAL_ENCRYPTION_KEY
+  openssl rand -hex 32      # → CREDENTIAL_ENCRYPTION_KEY (must be exactly 64 hex characters)
   ```
   Keep `CREDENTIAL_ENCRYPTION_KEY` safe: if you lose or change it, saved database passwords can no longer be decrypted.
 
@@ -77,13 +77,17 @@ FRONTEND_ORIGIN=https://frontend-production-xxxx.up.railway.app
 
 Railway redeploys the backend. Open the frontend URL, create an account, upload a CSV and ask a question.
 
+## Optional: Google / GitHub sign-in
+
+The backend supports `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`. Because the browser reaches the API through the `/backend` proxy, set `BETTER_AUTH_URL` to `https://<frontend-url>/backend` and register `https://<frontend-url>/backend/api/auth/callback/<google|github>` as the provider's callback URL. (Untested: email/password sign-in is the path this guide covers.)
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
 | Sign-up/sign-in fails, backend logs ECONNREFUSED to Postgres | `DATABASE_URL` wrong, or the Postgres service isn't running |
 | `extension "vector" is not available` in backend logs | Postgres image without pgvector — use the pgvector template or Neon/Supabase |
-| Pages load but every action shows a 5xx / "Internal Server Error" | The frontend can't reach the backend. Check `BACKEND_URL` (and that the frontend was rebuilt after setting it). If the frontend logs show `ECONNREFUSED`/`ENOTFOUND` for the private domain, add `HOST=::` to the **backend** variables so it also listens on IPv6 (some Railway private networks are IPv6-only), and redeploy |
+| Pages load but every action shows a 5xx / "Internal Server Error" | The frontend can't reach the backend. Check `BACKEND_URL` (and that the frontend was rebuilt after setting it). If the frontend logs show `ECONNREFUSED`/`ENOTFOUND` for the private domain, add `HOST=::` to the **backend** variables so it also listens on IPv6 (older Railway environments resolve private names to IPv6 only; newer ones are dual-stack, so this is usually not needed there), and redeploy |
 | Login works but you're logged out on refresh | `BETTER_AUTH_URL` / `BETTER_AUTH_TRUSTED_ORIGIN` don't exactly match the frontend URL |
 | "The AI service isn't configured correctly" | `ANTHROPIC_API_KEY` missing or wrong on the backend |
 | "This session's data file is no longer available" for old uploads | The volume wasn't attached at `/data` (or `SESSIONS_DIR` doesn't point into it) |
