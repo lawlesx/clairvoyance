@@ -57,7 +57,7 @@ queryRouter.post("/stream", async (c) => {
   const understanding =
     (await getSessionUnderstanding(sessionId)) ?? undefined;
 
-  return streamSSE(c, async (stream) => {
+  const response = streamSSE(c, async (stream) => {
     const controller = new AbortController();
     // Keep proxies and the connection from timing out during long model turns.
     const heartbeat = setInterval(() => { stream.write(": keep-alive\n\n").catch(() => {}); }, 15_000);
@@ -86,6 +86,13 @@ queryRouter.post("/stream", async (c) => {
       clearInterval(heartbeat);
     }
   });
+
+  // "no-transform" stops proxies (including the Next.js frontend proxy) from gzip-buffering the
+  // stream, which would hold back every progress event until the answer is done.
+  // (Set on the returned response because streamSSE writes its own Cache-Control.)
+  c.header("Cache-Control", "no-cache, no-transform");
+  c.header("X-Accel-Buffering", "no");
+  return response;
 });
 
 function sanitizeHistory(history: unknown): HistoryTurn[] {

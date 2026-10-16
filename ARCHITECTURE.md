@@ -275,3 +275,18 @@ Migrations live in `backend/drizzle/` and are listed in `meta/_journal.json` (`0
 - Overviews: structured outputs with JSON schemas, `effort: "low"`.
 - Server-side refusal fallbacks (`fallbacks: "default"`) are enabled on models that support them; `ANTHROPIC_REFUSAL_FALLBACK=off` disables this for gateways that reject the parameter.
 - Assistant turns (including thinking blocks) are appended unchanged during the tool loop.
+
+---
+
+## 10. Deployment shape
+
+```
+Browser ── https ──► frontend (Next.js) ── /backend/* rewrite ──► backend (Bun) ──► Postgres + pgvector
+                                                                    └── volume: SESSIONS_DIR (uploaded SQLite files)
+```
+
+- The frontend is the only public service. `next.config.ts` rewrites `/backend/:path*` to `BACKEND_URL` (resolved at **build** time), so the browser sees one origin and the Better Auth cookie is first-party. The auth client is pointed at `<origin>/backend/api/auth` (`lib/authClient.ts`).
+- `experimental.proxyTimeout` is raised to 5 minutes (default 30 s) because answers stream for a while.
+- The SSE response carries `Cache-Control: no-cache, no-transform` so the proxy doesn't gzip-buffer it; without that, every progress event arrives only when the answer is finished.
+- The backend must run as a single instance: uploads are local SQLite files and analysis jobs are tracked in memory.
+- Both services have Dockerfiles; the backend image runs `drizzle-kit migrate` before starting. See [DEPLOY.md](./DEPLOY.md).

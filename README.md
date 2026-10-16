@@ -95,6 +95,10 @@ bun run dev                # → http://localhost:3000
 
 Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if the backend isn't on `http://localhost:3001`.
 
+### Deploying
+
+See [DEPLOY.md](./DEPLOY.md) for a step-by-step Railway guide (Dockerfiles for both services are included). In production the browser talks only to the frontend, which proxies `/backend/*` to the API so login cookies stay on one domain.
+
 ### Both at once (from the project root)
 
 ```bash
@@ -135,6 +139,8 @@ cd frontend && bun run lint && bun run build
 | `DATA_ROWS_TO_MODEL` | `40` | Preview rows the AI sees (it also gets exact statistics over all rows) |
 | `QUERY_TIMEOUT_MS` | `30000` | Per-statement timeout on live databases |
 | `SCHEMA_CACHE_TTL_MS` | `600000` | How long a live database's table list is cached |
+| `SESSIONS_DIR` | `backend/sessions` | Where uploaded files are stored — point it at a persistent volume in production |
+| `HOST` | `0.0.0.0` | Interface the API listens on; `::` also accepts IPv6 (for IPv6-only private networks) |
 | `FULL_SCHEMA_TABLE_LIMIT` | `25` | Above this many tables (or 600 columns) only the relevant tables go into each prompt |
 
 ---
@@ -185,8 +191,10 @@ Every visual has a Table view, CSV download and image export. The categorical pa
 
 ```
 clairvoyance/
-├── docker-compose.yml               Postgres 16 + pgvector (port 5433)
+├── docker-compose.yml               Postgres 16 + pgvector (port 5433) for local development
+├── DEPLOY.md                        Railway deployment guide
 ├── backend/
+│   ├── Dockerfile, railway.json     Production image (runs migrations, then the API)
 │   ├── drizzle/                     SQL migrations (+ meta/_journal.json)
 │   └── src/
 │       ├── index.ts                 Hono app — routers, CORS, auth, public share route
