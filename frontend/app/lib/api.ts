@@ -26,7 +26,9 @@ export interface DataUnderstanding {
   areas?: { name: string; description: string }[];
 }
 
-export type VisualType = "kpi" | "bar" | "line" | "area" | "pie" | "scatter" | "table" | "none";
+export type VisualType =
+  | "kpi" | "bar" | "stacked_bar" | "line" | "area" | "pie" | "treemap" | "scatter"
+  | "histogram" | "heatmap" | "table" | "none";
 export type ValueFormat = "number" | "currency" | "percent" | "ratio" | "date" | "text";
 
 export interface Visual {

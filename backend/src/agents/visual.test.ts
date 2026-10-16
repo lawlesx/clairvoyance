@@ -71,6 +71,23 @@ describe("suggestVisual", () => {
     expect(suggestVisual(rows, profileColumns(rows), "what share of signups comes from each channel").type).toBe("pie");
   });
 
+  test("single measure with many records → histogram", () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ({ price: 100 + i * 10 }));
+    expect(suggestVisual(rows, profileColumns(rows), q)).toEqual({ type: "histogram", y: ["price"] });
+  });
+
+  test("two wide categories + measure → heatmap; composition question → stacked bars", () => {
+    const wide = ["a", "b", "c", "d", "e", "f", "g", "h"].flatMap((c) => ["x", "y", "z", "w", "v", "u", "t", "s"].map((p) => ({ cuisine: c, city: p, n: 1 })));
+    expect(suggestVisual(wide, profileColumns(wide), q).type).toBe("heatmap");
+    const small = ["a", "b"].flatMap((c) => ["x", "y"].map((p) => ({ cuisine: c, city: p, n: 1 })));
+    expect(suggestVisual(small, profileColumns(small), "breakdown of orders").type).toBe("stacked_bar");
+  });
+
+  test("many parts of a whole → treemap", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ cuisine: `c${i}`, n: i + 1 }));
+    expect(suggestVisual(rows, profileColumns(rows), "share of restaurants by cuisine").type).toBe("treemap");
+  });
+
   test("text-only results and un-aggregated records → table", () => {
     const names = [{ name: "a", email: "x" }, { name: "b", email: "y" }];
     expect(suggestVisual(names, profileColumns(names), q).type).toBe("table");
@@ -92,6 +109,14 @@ describe("validateVisual", () => {
   test("rejects references to columns that don't exist or aren't numeric", () => {
     expect(validateVisual({ type: "bar", x: "month", y: ["profit"] }, rows, cols)).toBeNull();
     expect(validateVisual({ type: "bar", x: "month", y: ["region"] }, rows, cols)).toBeNull();
+  });
+
+  test("validates histogram and heatmap proposals", () => {
+    const r = Array.from({ length: 10 }, (_, i) => ({ c: `c${i % 5}`, d: `d${i % 2}`, v: i }));
+    const cs = profileColumns(r);
+    expect(validateVisual({ type: "histogram", y: ["v"] }, r, cs)).toEqual({ type: "histogram", y: ["v"], title: undefined });
+    expect(validateVisual({ type: "heatmap", x: "c", y: ["v"] }, r, cs)).toBeNull();
+    expect(validateVisual({ type: "heatmap", x: "c", series: "d", y: ["v"] }, r, cs)?.type).toBe("heatmap");
   });
 
   test("rejects a pie with negative values", () => {
