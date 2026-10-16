@@ -29,6 +29,7 @@ async function checkDatabase() {
       `   • Using your own Postgres: point DATABASE_URL in backend/.env at it (it needs the pgvector extension).\n` +
       `   Then run: cd backend && bunx drizzle-kit migrate\n`
     );
+    if (process.env.NODE_ENV === "production") process.exit(1);
   }
 }
 checkDatabase();
